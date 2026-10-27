@@ -3,12 +3,16 @@
 ## Status verifikasi (jujur)
 
 - Terverifikasi dengan menjalankan di mesin build (JDK 21, Android SDK platform 37.0, build-tools 37.0.0):
-  `./gradlew clean assembleDebug test assembleRelease` berhasil; 45 unit test lulus; APK release ditandatangani
-  dengan keystore uji sementara dan lolos `apksigner verify`.
+  `./gradlew assembleDebug test` berhasil (76 unit test lulus, 0 gagal) dan `assembleRelease` dengan
+  `-Pbilling.baseUrl.release=https://api.example.com/billing/api/v1/` menghasilkan APK (tanpa keystore: unsigned).
+  Pada build awal (sebelum perbaikan review) APK release sempat ditandatangani dengan keystore uji sementara dan lolos
+  `apksigner verify`; langkah itu belum diulang setelah perbaikan.
+  `assembleRelease` dengan placeholder / `http://` / tanpa `/` akhir / ada tanda kutip GAGAL seperti yang diharapkan.
 - TIDAK terverifikasi: aplikasi belum dijalankan di perangkat/emulator (tidak ada emulator di mesin build), sehingga
   alur UI, Keystore AES/GCM, Room, DataStore, dan R8 (build release dengan minify) belum diuji saat runtime.
   Aturan proguard ditulis untuk Retrofit/kotlinx.serialization tetapi perlu uji manual pada APK release.
-- Workflow GitHub Actions divalidasi sintaks YAML-nya saja; belum pernah dijalankan di GitHub.
+- Workflow GitHub Actions belum pernah dijalankan di GitHub (SHA action diverifikasi lewat `gh api`, sintaks tidak dijalankan).
+  Environment `release` harus dibuat manual di GitHub sebelum job release dapat berjalan.
 - Backend tidak tersedia, jadi seluruh integrasi hanya diuji lewat MockWebServer terhadap kontrak yang diberikan.
 
 ## Asumsi
@@ -30,21 +34,44 @@
 10. Idempotency-Key (UUID v4):
     - Invoice: dibuat saat Simpan ditekan, disimpan di draft Room bersama hash payload SEBELUM request dikirim; dipakai ulang bila payload sama, diganti bila payload berubah.
     - Customer dan expense: key disimpan di memori ViewModel form (tidak ada draft lokal untuk keduanya); hilang bila layar form ditutup.
+      Batasan ini TETAP ada (review R-06/T10): bila proses mati setelah hasil tidak pasti, kirim ulang memakai key baru.
+    - Invoice: kolom `uncertainSince` pada draft Room menandai percobaan kirim yang hasilnya belum pasti (ditulis SEBELUM request,
+      dihapus hanya saat sukses, draft dikosongkan, atau gagal pasti pada percobaan pertama). Selama ada, tombol Simpan menampilkan
+      dialog dan tidak mengirim; "Kirim ulang" butuh dua konfirmasi dan memakai key yang sama untuk payload yang sama.
     - Dialog "Status penyimpanan belum pasti" juga dipakai untuk customer dan expense (bukan hanya invoice). 5xx selain 503 dianggap hasil tidak pasti.
+      Kegagalan yang PASTI belum terkirim (UnknownHost, ConnectException/NoRoute, TLS handshake) bukan hasil tidak pasti: pesan "belum tersimpan".
+      Timeout (termasuk timeout koneksi) tetap diperlakukan tidak pasti karena tidak bisa dibedakan dari timeout baca.
     - Setelah hasil tidak pasti pada invoice, daftar invoice di-refresh dengan filter customer + bulan tanggal invoice, lalu disaring di klien:
       tanggal invoice sama dengan tanggal yang dikirim ATAU dibuat hari ini (API tidak punya filter tanggal harian).
 11. Update customer/expense (PUT, seluruh field) bersifat idempoten sehingga tidak memakai Idempotency-Key dan tidak memakai dialog hasil-tidak-pasti.
+    Expense yang tidak ditemukan dikembalikan server sebagai 422: bila PUT/DELETE gagal 422 tanpa rincian field, klien memeriksa dengan GET;
+    bila GET 404/422, form ditandai "sudah tidak ada di server" dengan tombol kembali ke daftar.
 12. Pengeluaran: seluruh halaman bulan dimuat (per_page=100, maksimal 50 halaman) agar "total bulan" akurat; tidak ada infinite scroll di layar ini.
     503 `module_not_ready` ditampilkan sebagai "Modul pengeluaran belum aktif".
 13. Daftar customer/invoice memakai per_page=20 dan infinite scroll; fallback cache Room hanya untuk daftar customer, katalog service, price list, dan profil saat jaringan gagal (bukan untuk invoice/expense/laporan).
 14. Profil (`/profile`, logo ~1 MB) diambil sekali setelah login, logo didecode ke file cache; layar lain memakai cache Room dan hanya mengambil ulang bila belum ada.
 15. Cache dipisah per `user_id:business_id` lewat kolom `scope` di setiap tabel; saat 401/403 account_inactive/logout semua tabel (`clearAllTables`), DataStore, kunci Keystore, dan file logo dihapus.
     Login baru juga menghapus data akun sebelumnya terlebih dahulu.
+    - Penghapusan fail-safe per langkah (token -> Room -> logo; satu langkah gagal tidak menghentikan yang lain) dan tidak dapat dibatalkan.
+      `restore()` tanpa sesi membersihkan sisa cache yatim (proses mati di tengah wipe).
+    - Penghapusan HANYA bila token request yang ditolak == token aktif; 401 hanya dari kode `unauthenticated`/`invalid_token`
+      (403 hanya `account_inactive`). Server yang membalas 401 tanpa kode (proxy/gateway) TIDAK menghapus sesi: pengguna melihat
+      error biasa dan dapat mencoba lagi.
+    - `generation` sesi naik tiap wipe; repository mengambil "tiket" (scope + generasi) SEBELUM request dan melewatkan penulisan cache
+      bila generasi berubah. Masih ada jendela sangat sempit antara pemeriksaan dan penulisan DAO (tidak atomik).
+    - Draft invoice lokal (termasuk yang belum pasti) IKUT terhapus saat sesi berakhir; Login menampilkan pesan agar pengguna memeriksa daftar invoice.
 16. Rekap: rentang maksimal 31 hari inklusif; pengguna tidak dapat mengirim request di luar rentang itu. Filter customer pada rekap didukung repository tetapi tidak ditampilkan di UI.
-17. Logging: HttpLoggingInterceptor hanya di debug, level BASIC (metode, URL, kode, ukuran; tanpa header/body), `Authorization` diredaksi, `/auth/login` tidak dicatat. `toString()` token dan password diredaksi.
+17. Logging: HttpLoggingInterceptor hanya di source set debug (`okhttp-logging` = `debugImplementation`), level BASIC (metode, URL, kode, ukuran; tanpa header/body), `Authorization` dan query `q` diredaksi, `/auth/login` tidak dicatat. `toString()` token dan password diredaksi.
+    R8 juga menghapus `Log.w/e`. OkHttp tidak mengikuti redirect (`followRedirects=false`): API v1 tidak diharapkan mengalihkan.
 18. `allowBackup=false` dan `data_extraction_rules` mengecualikan semua data dari backup/transfer.
 19. Tidak ada data nyata di kode; tidak ada `@Preview` Compose sehingga tidak ada data contoh sama sekali.
 20. Ikon aplikasi adalah placeholder vektor sederhana.
+21. Label status di UI dan teks bagikan berbahasa Indonesia (Draft, Terkirim, Lunas, Dibatalkan); nilai wire ke API tetap `Draft/Sent/Paid/Cancelled`.
+    Teks bagikan TIDAK memuat status internal; memuat "Status pembayaran" (Lunas/Dibayar sebagian/Belum dibayar) dari angka server, atau
+    "DIBATALKAN". Membagikan invoice Draft meminta konfirmasi.
+22. `FLAG_SECURE` aktif di Login, Akun, dan Detail invoice (penghitung referensi agar transisi layar tidak melepasnya).
+    Daftar/form customer, pengeluaran, dan rekap belum diamankan.
+23. Database Room v2 (migrasi eksplisit 1->2). Downgrade saja yang boleh mengosongkan database (cache + draft).
 
 ## Belum diimplementasi / batasan
 
@@ -57,3 +84,13 @@
 - Dukungan tema gelap ada, tetapi warna badge status tidak disesuaikan untuk mode gelap.
 - Tidak ada lokalisasi selain Bahasa Indonesia; teks UI ditulis langsung di Compose (bukan strings.xml), kecuali nama app.
 - Sertifikat pinning tidak diterapkan.
+
+## Temuan review yang SENGAJA tidak diperbaiki di cabang ini
+
+- Enkripsi Room/logo (PRV-01/T8: SQLCipher), retensi/TTL cache, dan certificate pinning: butuh keputusan kebijakan/rotasi sertifikat.
+- `gradle/verification-metadata.xml` (verifikasi checksum dependency): perlu dibuat dengan `--write-verification-metadata` di jaringan penuh.
+- Idempotency-Key customer/expense tetap di memori (R-06).
+- Pembulatan preview per baris (F2/BR-01), format kirim number-vs-string invoice (F1), batas atas nominal, K-2 (pencatatan pembayaran),
+  K-3/K-4 (profil/rekening basi), role-based UI (A-02), `expires_at` belum ditegakkan di klien (T13), `strings.xml`/tema/ikon (SMV-01/02/05).
+- Pesan error server ditampilkan apa adanya (A-08/SMV-12).
+- Daftar customer/pengeluaran tidak otomatis menyegarkan saat kembali dari form (Home sudah).
