@@ -12,10 +12,35 @@ data class InvoicePreview(
     val subtotal: BigDecimal,
     val hasMissingPrice: Boolean,
 ) {
-    data class Line(val item: DraftItem, val qty: BigDecimal?, val unitPrice: BigDecimal, val amount: BigDecimal, val priceMissing: Boolean)
+    /** Asal harga satu baris. UNKNOWN = harga belum/gagal dimuat (jangan diperingatkan sebagai "tanpa harga"). */
+    enum class PriceState { OK, NOT_IN_PRICE_LIST, ZERO_PRICE, UNKNOWN }
+
+    data class Line(
+        val item: DraftItem,
+        val qty: BigDecimal?,
+        val unitPrice: BigDecimal,
+        val amount: BigDecimal,
+        val priceMissing: Boolean,
+        val state: PriceState = if (priceMissing) PriceState.NOT_IN_PRICE_LIST else PriceState.OK,
+    )
+
+    /** Jumlah baris yang harganya Rp 0 / tidak ditemukan (tidak menghitung UNKNOWN). */
+    val problemCount: Int get() = lines.count { it.state == PriceState.NOT_IN_PRICE_LIST || it.state == PriceState.ZERO_PRICE }
 
     companion object {
-        fun compute(items: List<DraftItem>, prices: Map<Long, BigDecimal>, flags: FeatureFlags): InvoicePreview {
+        /**
+         * Preview LOKAL. Sengaja TIDAK ada aturan pembulatan di sini: amount = harga x qty apa adanya (bisa 4 desimal),
+         * subtotal = jumlah nilai itu. Aturan pembulatan server belum diketahui (lihat ASSUMPTIONS.md), jadi layar
+         * hanya menyebut angka ini perkiraan; server yang menentukan total final.
+         *
+         * @param pricesKnown false bila harga belum dimuat atau gagal dimuat: baris tanpa override diberi state UNKNOWN.
+         */
+        fun compute(
+            items: List<DraftItem>,
+            prices: Map<Long, BigDecimal>,
+            flags: FeatureFlags,
+            pricesKnown: Boolean = true,
+        ): InvoicePreview {
             val lines = items.map { item ->
                 val qty = MoneyParser.parseQuantity(item.qtyText)
                 val override = if (flags.priceOverride && item.overridePriceText.isNotBlank()) {
@@ -23,14 +48,22 @@ data class InvoicePreview(
                 } else {
                     null
                 }
-                val price = override ?: prices[item.serviceId] ?: BigDecimal.ZERO
+                val listed = prices[item.serviceId]
+                val price = override ?: listed ?: BigDecimal.ZERO
                 val amount = if (qty != null) price.multiply(qty) else BigDecimal.ZERO
-                Line(item, qty, price, amount, priceMissing = price.signum() == 0)
+                val state = when {
+                    override != null -> if (override.signum() == 0) PriceState.ZERO_PRICE else PriceState.OK
+                    !pricesKnown -> PriceState.UNKNOWN
+                    listed == null -> PriceState.NOT_IN_PRICE_LIST
+                    listed.signum() == 0 -> PriceState.ZERO_PRICE
+                    else -> PriceState.OK
+                }
+                Line(item, qty, price, amount, priceMissing = price.signum() == 0, state = state)
             }
             return InvoicePreview(
                 lines = lines,
                 subtotal = lines.fold(BigDecimal.ZERO) { acc, l -> acc + l.amount },
-                hasMissingPrice = lines.any { it.priceMissing },
+                hasMissingPrice = lines.any { it.state == PriceState.NOT_IN_PRICE_LIST || it.state == PriceState.ZERO_PRICE },
             )
         }
     }

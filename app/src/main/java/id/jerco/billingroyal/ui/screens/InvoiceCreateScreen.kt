@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -48,7 +49,9 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import id.jerco.billingroyal.core.AppDates
 import id.jerco.billingroyal.core.FeatureFlags
+import id.jerco.billingroyal.core.DraftCustomerCheck
 import id.jerco.billingroyal.core.InvoicePreview
+import id.jerco.billingroyal.core.LatestOnly
 import id.jerco.billingroyal.core.MoneyFormatter
 import id.jerco.billingroyal.core.MoneyParser
 import id.jerco.billingroyal.data.remote.ApiResult
@@ -76,7 +79,6 @@ import java.time.LocalDate
 import java.time.YearMonth
 import javax.inject.Inject
 import kotlinx.coroutines.FlowPreview
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -88,6 +90,13 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+
+private const val DRAFT_PRICE_LIST_CHANGED =
+    "Price list customer berubah sejak draft disimpan. Harga diperbarui sesuai price list terbaru; periksa kembali preview."
+private const val DRAFT_CUSTOMER_GONE =
+    "Customer pada draft ini tidak ditemukan lagi di server. Pilih customer lagi."
+private const val DRAFT_UNVERIFIED =
+    "Customer dan harga pada draft belum bisa dicocokkan dengan server (jaringan). Harga di preview mungkin tidak terbaru."
 
 private const val RESTORED_UNCERTAIN_MESSAGE =
     "Pengiriman invoice sebelumnya belum diketahui hasilnya (koneksi terputus, waktu habis, atau aplikasi sempat " +
@@ -114,6 +123,12 @@ data class InvoiceFormUi(
     val saving: Boolean = false,
     val error: String? = null,
     val uncertain: UncertainUi? = null,
+    /** Draft yang dipulihkan sedang dicocokkan dengan data customer/price list terbaru di server. */
+    val draftChecking: Boolean = false,
+    /** Catatan hasil pencocokan draft (price list berubah, customer tidak ada, tidak bisa diperiksa). */
+    val draftNotice: String? = null,
+    /** Pesan singkat (mis. item duplikat/batas item) yang tidak mengganggu simpan. */
+    val itemNotice: String? = null,
 )
 
 @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
@@ -142,7 +157,7 @@ class InvoiceCreateViewModel @Inject constructor(
     private var resendConfirmed = false
     // Draft sudah berhasil dikirim: autosave yang tertunda tidak boleh menghidupkan kembali draft.
     private var submitted = false
-    private var pricesJob: Job? = null
+    private val latestPrices = LatestOnly(viewModelScope)
 
     // ---- picker customer (pencarian di server, debounce 300 ms; baru aktif saat dialog dibuka)
     private val customerQuery = MutableStateFlow<String?>(null)
@@ -185,7 +200,10 @@ class InvoiceCreateViewModel @Inject constructor(
                         items = draft.items,
                     )
                 }
-                if (draft.customerId != null) loadPrices(draft.priceListId)
+                if (draft.customerId != null) {
+                    loadPrices(draft.priceListId)
+                    refreshRestoredCustomer(draft.customerId, draft.priceListId)
+                }
                 if (uncertainPending) checkExisting(draft.customerId, draft.invoiceDate)
             } else {
                 _ui.update { it.copy(restoring = false) }
@@ -219,17 +237,66 @@ class InvoiceCreateViewModel @Inject constructor(
 
     fun selectCustomer(c: CustomerDto) {
         _ui.update {
-            it.copy(customerId = c.id, customerName = c.name, priceListId = c.price_list_id, prices = emptyMap(), error = null)
+            it.copy(
+                customerId = c.id, customerName = c.name, priceListId = c.price_list_id, prices = emptyMap(),
+                error = null, draftNotice = null, draftChecking = false,
+            )
         }
         loadPrices(c.price_list_id)
         persist()
     }
 
+    /**
+     * Draft yang dipulihkan memakai customer/price list yang tersimpan saat draft dibuat. Ambil ulang customer dari
+     * server: bila price list berubah, harga lama tidak dipakai (dimuat ulang) dan operator diberi tahu; bila customer
+     * hilang, operator harus memilih ulang; bila tidak bisa diperiksa, preview diberi tanda "mungkin tidak terbaru".
+     */
+    private fun refreshRestoredCustomer(customerId: Long, draftPriceListId: Long?) {
+        _ui.update { it.copy(draftChecking = true) }
+        viewModelScope.launch {
+            val check = DraftCustomerCheck.evaluate(draftPriceListId, customers.get(customerId))
+            // Pengguna sudah memilih customer lain selama pengecekan: abaikan hasil lama.
+            if (_ui.value.customerId != customerId) {
+                _ui.update { it.copy(draftChecking = false) }
+                return@launch
+            }
+            when (check) {
+                DraftCustomerCheck.Unchanged -> _ui.update { it.copy(draftChecking = false) }
+                is DraftCustomerCheck.PriceListChanged -> {
+                    _ui.update {
+                        it.copy(
+                            draftChecking = false,
+                            customerName = check.customer.name,
+                            priceListId = check.customer.price_list_id,
+                            prices = emptyMap(),
+                            draftNotice = DRAFT_PRICE_LIST_CHANGED,
+                        )
+                    }
+                    loadPrices(check.customer.price_list_id)
+                    persist()
+                }
+                DraftCustomerCheck.CustomerGone -> _ui.update {
+                    it.copy(
+                        draftChecking = false,
+                        customerId = null,
+                        customerName = null,
+                        priceListId = null,
+                        prices = emptyMap(),
+                        pricesLoading = false,
+                        draftNotice = DRAFT_CUSTOMER_GONE,
+                    )
+                }
+                DraftCustomerCheck.Unverified -> _ui.update { it.copy(draftChecking = false, draftNotice = DRAFT_UNVERIFIED) }
+            }
+        }
+    }
+
     fun loadPrices(priceListId: Long? = _ui.value.priceListId) {
         _ui.update { it.copy(pricesLoading = true, pricesError = null) }
-        pricesJob?.cancel() // respons price list lama tidak boleh menimpa yang baru (customer berganti cepat)
-        pricesJob = viewModelScope.launch {
-            when (val r = catalog.priceMap(priceListId)) {
+        // Hanya permintaan TERBARU yang boleh menerapkan hasil: respons price list customer A tidak boleh menimpa
+        // harga customer B bila operator berganti customer dengan cepat.
+        latestPrices.launch({ catalog.priceMap(priceListId) }) { r ->
+            when (r) {
                 is ApiResult.Success -> _ui.update { it.copy(prices = r.data, pricesLoading = false) }
                 is ApiResult.Failure -> _ui.update { it.copy(pricesLoading = false, pricesError = r.error.message) }
             }
@@ -248,11 +315,18 @@ class InvoiceCreateViewModel @Inject constructor(
 
     fun addService(s: ServiceDto) {
         _ui.update {
-            if (it.items.any { i -> i.serviceId == s.id }) it
-            else it.copy(items = it.items + DraftItem(s.id, s.name, s.unit, "1"), error = null)
+            when {
+                it.items.any { i -> i.serviceId == s.id } ->
+                    it.copy(itemNotice = "\"${s.name}\" sudah ada di invoice. Ubah qty pada item tersebut.")
+                it.items.size >= InvoiceRepository.MAX_ITEMS ->
+                    it.copy(itemNotice = "Maksimal ${InvoiceRepository.MAX_ITEMS} item per invoice.")
+                else -> it.copy(items = it.items + DraftItem(s.id, s.name, s.unit, "1"), error = null, itemNotice = null)
+            }
         }
         persist()
     }
+
+    fun dismissItemNotice() = _ui.update { it.copy(itemNotice = null) }
 
     fun setQty(index: Int, text: String) = mutateItem(index) { it.copy(qtyText = text) }
     fun setOverridePrice(index: Int, text: String) = mutateItem(index) { it.copy(overridePriceText = text) }
@@ -414,7 +488,11 @@ fun InvoiceCreateScreen(
     }
 
     val flags = viewModel.flags
-    val preview = InvoicePreview.compute(ui.items, ui.prices, flags)
+    // Harga dianggap diketahui hanya bila sudah selesai dimuat tanpa error (atau belum ada customer).
+    val pricesKnown = ui.customerId == null || (!ui.pricesLoading && ui.pricesError == null)
+    val preview = remember(ui.items, ui.prices, flags, pricesKnown) {
+        InvoicePreview.compute(ui.items, ui.prices, flags, pricesKnown)
+    }
 
     AppScaffold(title = "Buat Invoice", onBack = onBack) { padding ->
         if (ui.restoring) {
@@ -433,8 +511,15 @@ fun InvoiceCreateScreen(
 
             DateField("Tanggal", ui.date, viewModel::setDate, Modifier.fillMaxWidth(), enabled = !ui.saving)
 
+            ui.draftNotice?.let { WarningBox(it) }
+            if (ui.draftChecking) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    Text("  Mencocokkan draft dengan data terbaru...", style = MaterialTheme.typography.bodySmall)
+                }
+            }
             if (ui.customerId != null && ui.priceListId == null) {
-                WarningBox("Customer ini belum memiliki price list. Harga item akan bernilai Rp 0.")
+                WarningBox("Customer ini belum memiliki price list, sehingga harga item tidak ditemukan (preview Rp 0).")
             }
             ui.pricesError?.let { msg ->
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -443,7 +528,7 @@ fun InvoiceCreateScreen(
                 }
             }
 
-            Text("Item", style = MaterialTheme.typography.titleMedium)
+            Text("Item (${ui.items.size}/${InvoiceRepository.MAX_ITEMS})", style = MaterialTheme.typography.titleMedium)
             if (ui.items.isEmpty()) Text("Belum ada item.", style = MaterialTheme.typography.bodyMedium)
             preview.lines.forEachIndexed { index, line ->
                 Card(Modifier.fillMaxWidth()) {
@@ -452,8 +537,12 @@ fun InvoiceCreateScreen(
                             Column(Modifier.weight(1f)) {
                                 Text(line.item.name, style = MaterialTheme.typography.titleSmall)
                                 Text(
-                                    "Harga: " + if (line.priceMissing) "tidak ada (Rp 0)" else MoneyFormatter.format(line.unitPrice) +
-                                        (if (line.item.unit.isNotBlank()) " / ${line.item.unit}" else ""),
+                                    "Harga: " + when (line.state) {
+                                        InvoicePreview.PriceState.UNKNOWN -> "belum dimuat"
+                                        InvoicePreview.PriceState.NOT_IN_PRICE_LIST -> "tidak ada di price list (Rp 0)"
+                                        InvoicePreview.PriceState.ZERO_PRICE -> "Rp 0"
+                                        InvoicePreview.PriceState.OK -> MoneyFormatter.format(line.unitPrice)
+                                    } + (if (line.item.unit.isNotBlank() && line.state != InvoicePreview.PriceState.UNKNOWN) " / ${line.item.unit}" else ""),
                                     style = MaterialTheme.typography.bodySmall,
                                 )
                             }
@@ -477,22 +566,42 @@ fun InvoiceCreateScreen(
                                 onValueChange = { viewModel.setOverridePrice(index, it) },
                                 label = { Text("Harga satuan khusus (opsional)") },
                                 singleLine = true,
+                                isError = line.item.overridePriceText.isNotBlank() && MoneyParser.parseAmount(line.item.overridePriceText) == null,
+                                supportingText = {
+                                    val parsed = MoneyParser.parseAmount(line.item.overridePriceText)
+                                    when {
+                                        line.item.overridePriceText.isBlank() -> Unit
+                                        parsed == null -> Text("Nominal tidak valid. Contoh: 15.000 atau 15.000,50")
+                                        else -> Text("Dibaca sebagai " + MoneyFormatter.format(parsed))
+                                    }
+                                },
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                 modifier = Modifier.fillMaxWidth(),
                             )
                         }
-                        Text("Perkiraan jumlah: " + MoneyFormatter.format(line.amount), style = MaterialTheme.typography.bodySmall)
+                        Text("Perkiraan jumlah (belum final): " + MoneyFormatter.format(line.amount), style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }
             OutlinedButton(
                 onClick = { viewModel.openServicePicker(); pickService = true },
-                enabled = !ui.saving,
+                enabled = !ui.saving && ui.items.size < InvoiceRepository.MAX_ITEMS,
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("Tambah item dari katalog") }
+            ui.itemNotice?.let { msg ->
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(msg, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                    TextButton(onClick = viewModel::dismissItemNotice) { Text("Tutup") }
+                }
+            }
 
-            if (ui.items.isNotEmpty() && preview.hasMissingPrice && !ui.pricesLoading) {
-                WarningBox("Ada item tanpa harga di price list customer. Item tersebut akan bernilai Rp 0 di server. Periksa sebelum menyimpan.")
+            // Hanya bila harga sudah diketahui: jangan menyalahkan "tanpa harga" saat harga masih dimuat/gagal dimuat
+            // (penyebab sebenarnya sudah ditampilkan sebagai galat di atas).
+            if (ui.items.isNotEmpty() && pricesKnown && preview.problemCount > 0) {
+                WarningBox(
+                    "${preview.problemCount} item berharga Rp 0 atau tidak ada di price list customer. " +
+                        "Nilai ini dikirim apa adanya; periksa sebelum menyimpan.",
+                )
             }
 
             OutlinedTextField(
@@ -507,7 +616,17 @@ fun InvoiceCreateScreen(
                 Column(Modifier.padding(12.dp)) {
                     Text("Perkiraan subtotal (preview)", style = MaterialTheme.typography.labelMedium)
                     Text(MoneyFormatter.format(preview.subtotal), style = MaterialTheme.typography.titleLarge)
-                    Text("Total final dihitung oleh server.", style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        "Hanya perkiraan: server yang menentukan subtotal dan total final (termasuk pembulatan).",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    if (ui.draftChecking || ui.pricesLoading || ui.pricesError != null || ui.draftNotice == DRAFT_UNVERIFIED) {
+                        Text(
+                            "Harga belum final atau mungkin tidak terbaru; angka di atas bisa berubah.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
                 }
             }
 

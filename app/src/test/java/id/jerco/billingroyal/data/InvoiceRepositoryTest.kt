@@ -232,6 +232,22 @@ class InvoiceRepositoryTest {
     }
 
     @Test
+    fun `item service yang sama dua kali ditolak sebelum request`() = runBlocking<Unit> {
+        val dup = draft(DraftItem(1, "Cuci", "kg", "1"), DraftItem(1, "Cuci", "kg", "2"))
+        val r = repo().submit(dup)
+        assertTrue(assertIs<ApiResult.Failure>(r).error.message.contains("sama"))
+        assertEquals(0, server.requestCount)
+    }
+
+    @Test
+    fun `tepat 200 item diterima dan dikirim`() = runBlocking<Unit> {
+        server.enqueue(created())
+        val items = List(200) { DraftItem(it.toLong() + 1, "x", "kg", "1") }
+        assertIs<ApiResult.Success<*>>(repo().submit(draft(*items.toTypedArray())))
+        assertEquals(200, bodyOf(server.takeRequest())["items"]!!.jsonArray.size)
+    }
+
+    @Test
     fun `list invoice mengirim filter dan membaca meta paginasi`() = runBlocking<Unit> {
         server.enqueue(
             MockResponse().setHeader("Content-Type", "application/json").setBody(

@@ -85,6 +85,23 @@
 - Tidak ada lokalisasi selain Bahasa Indonesia; teks UI ditulis langsung di Compose (bukan strings.xml), kecuali nama app.
 - Sertifikat pinning tidak diterapkan.
 
+## Preview harga (BOQ/RAB review): keputusan dan yang belum dikerjakan
+
+- **Aturan pembulatan server BELUM DIKETAHUI dan butuh konfirmasi pemilik/backend** (BR-01): apakah pembulatan dilakukan per baris,
+  hanya pada subtotal, ke berapa desimal, dan mode pembulatannya (HALF_UP/bankir/dst). Klien SENGAJA tidak menambahkan aturan
+  karangan: preview menghitung harga x qty apa adanya (bisa lebih dari 2 desimal) dan layar melabelinya
+  "Perkiraan ... server yang menentukan subtotal dan total final (termasuk pembulatan)". Begitu aturan dikonfirmasi, tambahkan
+  ke `InvoicePreview.compute` beserta test pembandingan dengan respons server nyata.
+- Draft yang dipulihkan mengambil ulang customer dari server (`GET /customers/{id}`) sebelum preview dipercaya. Bila price list
+  berubah, harga dimuat ulang dan operator diberi tahu; bila customer hilang, harus dipilih ulang; bila tidak bisa diperiksa
+  (offline), preview ditandai "mungkin tidak terbaru". Draft TIDAK menyimpan snapshot harga (sengaja: harga server yang berlaku),
+  sehingga perubahan harga tidak dapat ditampilkan sebagai selisih rupiah, hanya sebagai pemberitahuan.
+- Permintaan harga memakai `LatestOnly` (hanya hasil permintaan terbaru diterapkan); dites di `LatestOnlyTest`.
+- BR-05 (field uang respons yang hilang menjadi Rp 0): tidak diubah. Menjadikan field uang wajib di DTO akan merusak decoding bila
+  kontrak API ternyata mengizinkan null/absen; perlu konfirmasi kontrak dari pemilik API.
+- BR-09 (batas atas qty/nominal), BR-11 (penanda preview dari cache), BR-14 (format nilai server >2 desimal), BR-15 (number vs string
+  pada body create): tidak diubah; perlu kebijakan/kontrak dari pemilik API. BR-01 lihat di atas.
+
 ## Temuan review yang SENGAJA tidak diperbaiki di cabang ini
 
 - Enkripsi Room/logo (PRV-01/T8: SQLCipher), retensi/TTL cache, dan certificate pinning: butuh keputusan kebijakan/rotasi sertifikat.

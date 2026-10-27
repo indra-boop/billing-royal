@@ -95,6 +95,10 @@ class InvoiceRepository @Inject constructor(
         if (draft.items.size > MAX_ITEMS) return ApiResult.Failure(clientValidation("Maksimal $MAX_ITEMS item per invoice."))
         if (draft.notes.length > MAX_NOTES) return ApiResult.Failure(clientValidation("Catatan maksimal $MAX_NOTES karakter."))
 
+        if (draft.items.map { it.serviceId }.toSet().size != draft.items.size) {
+            return ApiResult.Failure(clientValidation("Ada item (service) yang sama lebih dari sekali. Gabungkan qty-nya menjadi satu item."))
+        }
+
         val items = ArrayList<InvoiceItemRequest>(draft.items.size)
         for ((index, item) in draft.items.withIndex()) {
             val qty = MoneyParser.parseQuantity(item.qtyText)
