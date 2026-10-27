@@ -1,5 +1,6 @@
 package id.jerco.billingroyal.ui.components
 
+import id.jerco.billingroyal.data.remote.InvoiceStatus
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -139,7 +140,7 @@ fun StatusBadge(status: String, modifier: Modifier = Modifier) {
         contentColor = StatusColors.content(status),
     ) {
         Text(
-            text = status,
+            text = InvoiceStatus.label(status),
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp),
             style = MaterialTheme.typography.labelMedium,
             fontWeight = FontWeight.SemiBold,
@@ -183,15 +184,32 @@ fun ConfirmDialog(
     )
 }
 
-/** Dialog hasil tidak pasti setelah timeout/network error pada request tulis. Tidak ada auto-retry. */
+/**
+ * Dialog hasil tidak pasti setelah timeout/network error pada request tulis. Tidak ada auto-retry.
+ * Aksi utama (tombol terisi) adalah "Periksa daftar". "Kirim ulang" butuh konfirmasi kedua yang
+ * menjelaskan risiko data ganda.
+ */
 @Composable
 fun UncertainDialog(
     message: String,
     onCheck: () -> Unit,
     onResend: () -> Unit,
     onDismiss: () -> Unit,
+    resendWarning: String = "Data mungkin sudah tersimpan di server. Mengirim ulang dapat membuat data GANDA. " +
+        "Lanjutkan hanya bila Anda sudah memeriksa daftar dan data ini belum ada.",
     extra: @Composable () -> Unit = {},
 ) {
+    var confirmResend by remember { mutableStateOf(false) }
+    if (confirmResend) {
+        AlertDialog(
+            onDismissRequest = { confirmResend = false },
+            title = { Text("Kirim ulang?") },
+            text = { Text(resendWarning) },
+            confirmButton = { TextButton(onClick = { confirmResend = false; onResend() }) { Text("Ya, kirim ulang") } },
+            dismissButton = { Button(onClick = { confirmResend = false }) { Text("Batal") } },
+        )
+        return
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Status penyimpanan belum pasti") },
@@ -201,10 +219,10 @@ fun UncertainDialog(
                 extra()
             }
         },
-        confirmButton = { TextButton(onClick = onCheck) { Text("Periksa daftar") } },
+        confirmButton = { Button(onClick = onCheck) { Text("Periksa daftar") } },
         dismissButton = {
             Row {
-                TextButton(onClick = onResend) { Text("Kirim ulang") }
+                TextButton(onClick = { confirmResend = true }) { Text("Kirim ulang") }
                 TextButton(onClick = onDismiss) { Text("Tutup") }
             }
         },

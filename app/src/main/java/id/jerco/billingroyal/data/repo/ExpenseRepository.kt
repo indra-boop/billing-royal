@@ -75,8 +75,10 @@ class ExpenseRepository @Inject constructor(
             }
             page++
         }
-        val total = all.fold(BigDecimal.ZERO) { acc, e -> acc + e.amount }
-        return ApiResult.Success(ExpenseMonth(all, total))
+        // Server bisa menggeser halaman saat data berubah: item yang sama tidak boleh tampil/terhitung dua kali.
+        val unique = all.distinctBy { it.id }
+        val total = unique.fold(BigDecimal.ZERO) { acc, e -> acc + e.amount }
+        return ApiResult.Success(ExpenseMonth(unique, total))
     }
 
     suspend fun get(id: Long): ApiResult<ExpenseDto> = apiCall { api.expense(id) }

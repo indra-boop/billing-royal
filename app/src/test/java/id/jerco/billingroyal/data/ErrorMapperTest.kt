@@ -2,6 +2,7 @@ package id.jerco.billingroyal.data
 
 import id.jerco.billingroyal.data.remote.AppError
 import id.jerco.billingroyal.data.remote.ErrorMapper
+import id.jerco.billingroyal.data.remote.displayMessage
 import id.jerco.billingroyal.data.remote.isModuleNotReady
 import id.jerco.billingroyal.data.remote.isOutcomeUncertain
 import id.jerco.billingroyal.data.remote.requiresRelogin
@@ -121,5 +122,46 @@ class ErrorMapperTest {
         assertIs<AppError.Unexpected>(s)
         assertTrue(s.isOutcomeUncertain)
         assertIs<AppError.Unexpected>(ErrorMapper.map(IllegalStateException("x")))
+    }
+
+    @Test
+    fun `401 dengan body kosong, non-JSON, atau kode tak dikenal TIDAK menghapus sesi`() {
+        assertFalse(ErrorMapper.fromHttp(401, null).requiresRelogin)
+        assertFalse(ErrorMapper.fromHttp(401, "").requiresRelogin)
+        assertFalse(ErrorMapper.fromHttp(401, "<html>Unauthorized (proxy)</html>").requiresRelogin)
+        assertFalse(ErrorMapper.fromHttp(401, body("something_else", "x")).requiresRelogin)
+        assertFalse(ErrorMapper.isSessionTerminating(401, ""))
+        assertTrue(ErrorMapper.isSessionTerminating(401, "unauthenticated"))
+        assertTrue(ErrorMapper.isSessionTerminating(401, "invalid_token"))
+        assertTrue(ErrorMapper.isSessionTerminating(403, "account_inactive"))
+        assertFalse(ErrorMapper.isSessionTerminating(403, ""))
+    }
+
+    @Test
+    fun `DNS gagal, koneksi ditolak, dan TLS handshake gagal ditandai belum terkirim`() {
+        listOf(
+            ErrorMapper.map(UnknownHostException("h")),
+            ErrorMapper.map(java.net.ConnectException("refused")),
+            ErrorMapper.map(javax.net.ssl.SSLHandshakeException("tls")),
+        ).forEach {
+            val n = assertIs<AppError.Network>(it)
+            assertTrue(n.notSent)
+            assertFalse(n.isOutcomeUncertain)
+        }
+        assertFalse((ErrorMapper.map(SocketTimeoutException("t")) as AppError.Network).notSent)
+    }
+
+    @Test
+    fun `displayMessage menyertakan rincian per field 422`() {
+        val e = ErrorMapper.fromHttp(
+            422,
+            body("validation_error", "Data tidak valid.", """{"name":"Nama wajib diisi.","items.0.qty":"Qty harus lebih dari 0."}"""),
+        )
+        val text = e.displayMessage
+        assertTrue(text.startsWith("Data tidak valid."))
+        assertTrue(text.contains("• Name: Nama wajib diisi."), text)
+        assertTrue(text.contains("• Item 1 (qty): Qty harus lebih dari 0."), text)
+        // tanpa rincian: sama dengan pesan biasa
+        assertEquals("Data tidak valid.", ErrorMapper.fromHttp(422, body("validation_error", "Data tidak valid.")).displayMessage)
     }
 }

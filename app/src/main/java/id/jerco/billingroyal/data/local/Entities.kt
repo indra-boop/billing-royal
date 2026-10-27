@@ -80,4 +80,10 @@ data class InvoiceDraftEntity(
     /** Hash payload yang terkait dengan [idempotencyKey]; bila payload berubah, key baru dibuat. */
     val payloadHash: String?,
     val updatedAt: Long,
+    /**
+     * Epoch millis saat percobaan kirim dimulai dan hasilnya belum pasti (timeout/putus/proses mati).
+     * Selama tidak null, dialog "Status penyimpanan belum pasti" muncul lagi walau proses sempat mati.
+     * Dihapus hanya saat invoice berhasil dibuat atau draft dikosongkan/ditolak server (percobaan pertama).
+     */
+    val uncertainSince: Long? = null,
 )

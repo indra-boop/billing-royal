@@ -24,6 +24,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -35,10 +36,13 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import id.jerco.billingroyal.data.local.SessionEvent
 import id.jerco.billingroyal.data.local.SessionManager
 import id.jerco.billingroyal.data.remote.ApiResult
 import id.jerco.billingroyal.data.remote.requiresRelogin
 import id.jerco.billingroyal.data.repo.AuthRepository
+import id.jerco.billingroyal.ui.components.InfoBanner
+import id.jerco.billingroyal.ui.components.SecureScreen
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -84,7 +88,7 @@ class SplashViewModel @Inject constructor(
     /** Dari layar error: keluar tanpa menunggu server. */
     fun forceLogin() {
         viewModelScope.launch {
-            sessionManager.clearAll(notify = false)
+            sessionManager.clearAll()
             _state.value = SplashState.GoLogin
         }
     }
@@ -125,9 +129,17 @@ fun SplashScreen(onHome: () -> Unit, onLogin: () -> Unit, viewModel: SplashViewM
 data class LoginState(val loading: Boolean = false, val error: String? = null, val success: Boolean = false)
 
 @HiltViewModel
-class LoginViewModel @Inject constructor(private val auth: AuthRepository) : ViewModel() {
+class LoginViewModel @Inject constructor(
+    private val auth: AuthRepository,
+    private val sessionManager: SessionManager,
+) : ViewModel() {
     private val _state = MutableStateFlow(LoginState())
     val state: StateFlow<LoginState> = _state
+
+    /** Alasan kembali ke Login (sesi berakhir / akun nonaktif); null bila pengguna membuka Login biasa. */
+    val notice: StateFlow<SessionEvent?> = sessionManager.notice
+
+    fun dismissNotice() = sessionManager.consumeNotice()
 
     /** Password hanya diteruskan ke request; tidak disimpan dan tidak dicatat. */
     fun login(username: String, password: String) {
@@ -151,7 +163,9 @@ class LoginViewModel @Inject constructor(private val auth: AuthRepository) : Vie
 @Composable
 fun LoginScreen(onLoggedIn: () -> Unit, viewModel: LoginViewModel = hiltViewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    var username by remember { mutableStateOf("") }
+    val notice by viewModel.notice.collectAsStateWithLifecycle()
+    SecureScreen()
+    var username by rememberSaveable { mutableStateOf("") } // password sengaja TIDAK disimpan ke state instance
     var password by remember { mutableStateOf("") }
 
     LaunchedEffect(state.success) { if (state.success) onLoggedIn() }
@@ -168,6 +182,10 @@ fun LoginScreen(onLoggedIn: () -> Unit, viewModel: LoginViewModel = hiltViewMode
     ) {
         Text("Billing Royal", style = MaterialTheme.typography.headlineMedium)
         Text("Masuk sebagai operator", style = MaterialTheme.typography.bodyMedium)
+        notice?.let {
+            Spacer(Modifier.height(16.dp))
+            InfoBanner(sessionNoticeText(it))
+        }
         Spacer(Modifier.height(24.dp))
         OutlinedTextField(
             value = username,
@@ -201,4 +219,13 @@ fun LoginScreen(onLoggedIn: () -> Unit, viewModel: LoginViewModel = hiltViewMode
             if (state.loading) CircularProgressIndicator(modifier = Modifier.height(18.dp), strokeWidth = 2.dp) else Text("Masuk")
         }
     }
+}
+
+/** Teks yang ditampilkan di Login saat sesi diakhiri oleh server (A-01). */
+fun sessionNoticeText(event: SessionEvent): String = when (event) {
+    SessionEvent.EXPIRED ->
+        "Sesi Anda berakhir. Silakan masuk lagi. Data lokal, termasuk draft invoice yang belum disimpan, " +
+            "sudah dihapus. Bila Anda sedang menyimpan invoice, periksa daftar invoice sebelum membuat ulang."
+    SessionEvent.ACCOUNT_INACTIVE ->
+        "Akun Anda dinonaktifkan. Hubungi admin laundry. Data lokal di perangkat ini sudah dihapus."
 }

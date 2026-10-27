@@ -29,6 +29,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -47,11 +48,13 @@ import id.jerco.billingroyal.ui.components.ConfirmDialog
 import id.jerco.billingroyal.ui.components.Load
 import id.jerco.billingroyal.ui.components.LoadStateView
 import id.jerco.billingroyal.ui.components.LabeledValue
+import id.jerco.billingroyal.ui.components.SecureScreen
 import java.time.LocalDate
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 // ------------------------------------------------------------------ Home
@@ -68,13 +71,40 @@ class HomeViewModel @Inject constructor(
     private val _state = MutableStateFlow(HomeUiState())
     val state: StateFlow<HomeUiState> = _state
 
-    init {
-        load(pull = false)
+    private var loadedOnce = false
+    private var job: Job? = null
+
+    /**
+     * Dipanggil setiap layar Home kembali aktif (ON_RESUME). Pertama kali memuat penuh; setelah itu
+     * menyegarkan diam-diam (tampilan lama tetap) agar ringkasan tidak basi setelah membuat invoice.
+     */
+    fun onResume() {
+        if (!loadedOnce) {
+            loadedOnce = true
+            load(pull = false)
+        } else {
+            refreshSilently()
+        }
+    }
+
+    private fun refreshSilently() {
+        if (_state.value.load !is Load.Content) return load(pull = false)
+        job?.cancel()
+        job = viewModelScope.launch {
+            val today = AppDates.today()
+            val from = today.withDayOfMonth(1)
+            val name = sessionManager.session.value?.businessName.orEmpty()
+            // Gagal: data lama tetap tampil (tidak diganti layar error).
+            (reports.invoices(from, today) as? ApiResult.Success)?.let { r ->
+                _state.value = HomeUiState(Load.Content(HomeData(name, from, today, r.data.summary)))
+            }
+        }
     }
 
     fun load(pull: Boolean) {
         _state.update { if (pull) it.copy(refreshing = true) else HomeUiState() }
-        viewModelScope.launch {
+        job?.cancel()
+        job = viewModelScope.launch {
             val today = AppDates.today()
             val from = today.withDayOfMonth(1)
             val name = sessionManager.session.value?.businessName.orEmpty()
@@ -97,6 +127,10 @@ fun HomeScreen(
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    LifecycleResumeEffect(viewModel) {
+        viewModel.onResume()
+        onPauseOrDispose { }
+    }
     AppScaffold(title = stringResource(R.string.app_name)) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
             LoadStateView(
@@ -205,6 +239,7 @@ fun AccountScreen(onBack: () -> Unit, onLoggedOut: () -> Unit, viewModel: Accoun
     val loggingOut by viewModel.loggingOut.collectAsStateWithLifecycle()
     val loggedOut by viewModel.loggedOut.collectAsStateWithLifecycle()
     var confirm by remember { mutableStateOf(false) }
+    SecureScreen()
 
     LaunchedEffect(loggedOut) { if (loggedOut) onLoggedOut() }
 
@@ -238,7 +273,7 @@ fun AccountScreen(onBack: () -> Unit, onLoggedOut: () -> Unit, viewModel: Accoun
     if (confirm) {
         ConfirmDialog(
             title = "Keluar",
-            message = "Semua data lokal akan dihapus dari perangkat ini.",
+            message = "Draft invoice yang belum disimpan akan hilang, dan semua data lokal dihapus dari perangkat ini. Lanjut keluar?",
             confirmText = "Keluar",
             onConfirm = { confirm = false; viewModel.logout() },
             onDismiss = { confirm = false },

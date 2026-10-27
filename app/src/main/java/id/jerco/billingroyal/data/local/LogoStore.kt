@@ -9,14 +9,22 @@ import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
+/** Penyimpanan logo hasil decode (dipisah sebagai interface agar bisa diganti di unit test). */
+interface LogoStore {
+    suspend fun saveFromDataUrl(scopeKey: String, dataUrl: String?): String?
+    suspend fun clear()
+}
+
 /** Decode logo (data URL base64) ke file cache sekali saja, agar tidak dipanggil/didecode di tiap layar. */
 @Singleton
-class LogoStore @Inject constructor(@ApplicationContext private val context: Context) {
+class FileLogoStore @Inject constructor(@ApplicationContext private val context: Context) : LogoStore {
 
     private val dir: File get() = File(context.cacheDir, "logo")
 
-    suspend fun saveFromDataUrl(scopeKey: String, dataUrl: String?): String? = withContext(Dispatchers.IO) {
+    override suspend fun saveFromDataUrl(scopeKey: String, dataUrl: String?): String? = withContext(Dispatchers.IO) {
         if (dataUrl.isNullOrBlank()) return@withContext null
+        // Batas ukuran: string base64 sangat besar tidak didecode (hardening; server dipercaya).
+        if (dataUrl.length > MAX_DATA_URL_CHARS) return@withContext null
         try {
             val base64 = dataUrl.substringAfter("base64,", missingDelimiterValue = dataUrl)
             val bytes = Base64.getMimeDecoder().decode(base64)
@@ -30,8 +38,12 @@ class LogoStore @Inject constructor(@ApplicationContext private val context: Con
         }
     }
 
-    suspend fun clear() = withContext(Dispatchers.IO) {
+    override suspend fun clear() = withContext(Dispatchers.IO) {
         dir.deleteRecursively()
         Unit
+    }
+
+    private companion object {
+        const val MAX_DATA_URL_CHARS = 3_000_000
     }
 }

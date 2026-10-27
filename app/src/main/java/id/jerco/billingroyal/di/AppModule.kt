@@ -1,7 +1,6 @@
 package id.jerco.billingroyal.di
 
 import android.content.Context
-import android.util.Log
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
@@ -26,13 +25,11 @@ import id.jerco.billingroyal.data.local.TokenCipher
 import id.jerco.billingroyal.data.remote.AuthInterceptor
 import id.jerco.billingroyal.data.remote.BillingApi
 import id.jerco.billingroyal.data.remote.JsonHeadersInterceptor
-import id.jerco.billingroyal.data.remote.LoginExcludingInterceptor
 import id.jerco.billingroyal.data.remote.NetworkFactory
 import id.jerco.billingroyal.data.remote.SessionInterceptor
 import id.jerco.billingroyal.data.repo.ScopeProvider
 import javax.inject.Singleton
 import okhttp3.OkHttpClient
-import okhttp3.logging.HttpLoggingInterceptor
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -62,7 +59,9 @@ object AppModule {
     @Singleton
     fun database(@ApplicationContext context: Context): AppDatabase =
         Room.databaseBuilder(context, AppDatabase::class.java, AppDatabase.NAME)
-            .fallbackToDestructiveMigration(dropAllTables = true) // cache saja; aman dibuang
+            // v1 -> v2 dimigrasi tanpa membuang draft/Idempotency-Key. Hanya downgrade yang boleh mengosongkan.
+            .addMigrations(AppDatabase.MIGRATION_1_2)
+            .fallbackToDestructiveMigrationOnDowngrade(dropAllTables = true)
             .build()
 
     @Provides fun customerDao(db: AppDatabase): CustomerDao = db.customerDao()
@@ -76,17 +75,10 @@ object AppModule {
         val interceptors = mutableListOf(
             JsonHeadersInterceptor(),
             AuthInterceptor { sessionManager.currentToken() },
-            SessionInterceptor { sessionManager.invalidateFromInterceptor() },
+            SessionInterceptor { token, reason, call -> sessionManager.invalidateIfCurrent(token, reason, call) },
         )
-        if (BuildConfig.DEBUG) {
-            // Hanya debug, level BASIC (tanpa header dan body). Authorization diredaksi sebagai pengaman
-            // tambahan, dan /auth/login tidak dicatat sama sekali.
-            val logging = HttpLoggingInterceptor { message -> Log.d("BillingRoyalHttp", message) }.apply {
-                level = HttpLoggingInterceptor.Level.BASIC
-                redactHeader("Authorization")
-            }
-            interceptors += LoginExcludingInterceptor(logging)
-        }
+        // Logging HTTP hanya ada di source set debug (okhttp-logging = debugImplementation); release: kosong.
+        interceptors += debugLoggingInterceptors()
         return NetworkFactory.okHttpClient(interceptors)
     }
 

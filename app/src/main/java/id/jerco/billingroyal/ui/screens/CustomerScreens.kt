@@ -52,6 +52,8 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import id.jerco.billingroyal.core.FeatureFlags
 import id.jerco.billingroyal.core.IdempotencyKeyHolder
 import id.jerco.billingroyal.data.remote.ApiResult
+import id.jerco.billingroyal.data.remote.AppError
+import id.jerco.billingroyal.data.remote.displayMessage
 import id.jerco.billingroyal.data.remote.CustomerDto
 import id.jerco.billingroyal.data.remote.PriceListSummaryDto
 import id.jerco.billingroyal.data.remote.isOutcomeUncertain
@@ -84,7 +86,7 @@ class CustomerListViewModel @Inject constructor(private val repo: CustomerReposi
     private val _query = MutableStateFlow("")
     val query: StateFlow<String> = _query
 
-    private val pager = Pager(viewModelScope) { page -> repo.list(_query.value, page) }
+    private val pager = Pager(viewModelScope, key = { it.id }) { page -> repo.list(_query.value, page) }
     val state = pager.state
 
     init {
@@ -376,9 +378,22 @@ class CustomerFormViewModel @Inject constructor(
                     _state.update { it.copy(saving = false, done = true) }
                 }
                 is ApiResult.Failure -> _state.update {
+                    val err = result.error
                     // Create yang hasilnya tidak pasti: JANGAN auto-retry.
-                    if (editId == null && result.error.isOutcomeUncertain) it.copy(saving = false, uncertain = true)
-                    else it.copy(saving = false, error = result.error.message)
+                    if (editId == null && err.isOutcomeUncertain) {
+                        it.copy(saving = false, uncertain = true)
+                    } else {
+                        // 422: tampilkan rincian per field (pesan umum + garis di bawah field terkait).
+                        val fields = (err as? AppError.Api)?.fieldErrors.orEmpty()
+                        it.copy(
+                            saving = false,
+                            error = if (err is AppError.Network && err.notSent) err.message + " Data belum tersimpan." else err.displayMessage,
+                            nameError = fields["name"],
+                            emailError = fields["email"],
+                            phoneError = fields["phone"],
+                            addressError = fields["address"],
+                        )
+                    }
                 }
             }
         }
@@ -448,7 +463,7 @@ fun CustomerFormScreen(onBack: () -> Unit, onCheckList: () -> Unit, viewModel: C
             message = "Koneksi terputus atau waktu habis setelah data dikirim. Customer mungkin sudah tersimpan. " +
                 "Periksa daftar customer terlebih dahulu sebelum mengirim ulang.",
             onCheck = { viewModel.dismissUncertain(); onCheckList() },
-            onResend = { viewModel.dismissUncertain(); viewModel.save() },
+            onResend = { viewModel.dismissUncertain(); viewModel.save() }, // sudah lewat konfirmasi kedua di dialog
             onDismiss = viewModel::dismissUncertain,
         )
     }

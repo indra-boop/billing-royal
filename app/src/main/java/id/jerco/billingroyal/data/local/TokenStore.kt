@@ -55,8 +55,13 @@ class TokenStore @Inject constructor(
             clear()
             return null
         }
-        val userId = prefs[K_USER_ID] ?: return null
-        val businessId = prefs[K_BUSINESS_ID] ?: return null
+        val userId = prefs[K_USER_ID]
+        val businessId = prefs[K_BUSINESS_ID]
+        if (userId == null || businessId == null) {
+            // Data sesi tidak lengkap: jangan sisakan ciphertext yatim.
+            clear()
+            return null
+        }
         val session = StoredSession(
             token = token,
             expiresAt = prefs[K_EXPIRES],
@@ -115,12 +120,21 @@ class TokenStore @Inject constructor(
     /** Menghapus token, seluruh isi DataStore akun, dan kunci Keystore. */
     suspend fun clear() {
         memory = null
-        dataStore.edit { it.clear() }
         try {
-            cipher.deleteKey()
-        } catch (_: Exception) {
-            // abaikan: kunci akan dibuat ulang bila perlu
+            dataStore.edit { it.clear() }
+        } finally {
+            // Kunci tetap dihapus walau DataStore gagal dibersihkan (ciphertext jadi tidak terbaca).
+            try {
+                cipher.deleteKey()
+            } catch (_: Exception) {
+                // abaikan: kunci akan dibuat ulang bila perlu
+            }
         }
+    }
+
+    /** Lupakan token di memori saja (langsung, tanpa I/O); dipakai saat sesi ditolak server. */
+    fun forgetInMemory() {
+        memory = null
     }
 
     private companion object {

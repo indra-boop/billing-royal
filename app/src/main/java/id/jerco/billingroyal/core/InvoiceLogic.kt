@@ -60,13 +60,28 @@ object InvoiceActions {
 }
 
 object InvoiceShareText {
+    /**
+     * Baris status untuk customer. Status internal ("Draft") TIDAK dikirim karena menyesatkan: invoice yang
+     * sudah dibagikan terlihat belum final. Yang ditampilkan adalah status PEMBAYARAN dari angka server,
+     * atau "DIBATALKAN" bila invoice dibatalkan.
+     */
+    fun paymentStatusLine(invoice: InvoiceDto): String? {
+        if (invoice.status == InvoiceStatus.CANCELLED) return "Status: ${InvoiceStatus.label(InvoiceStatus.CANCELLED).uppercase()}"
+        return when {
+            invoice.subtotal.signum() > 0 && invoice.balance.signum() <= 0 -> "Status pembayaran: Lunas"
+            invoice.paid_amount.signum() > 0 && invoice.balance.signum() > 0 -> "Status pembayaran: Dibayar sebagian"
+            invoice.subtotal.signum() > 0 -> "Status pembayaran: Belum dibayar"
+            else -> null
+        }
+    }
+
     fun build(invoice: InvoiceDto, profile: ProfileEntity?): String = buildString {
         profile?.let { appendLine(it.name) }
         profile?.address?.takeIf { it.isNotBlank() }?.let { appendLine(it) }
         appendLine("INVOICE ${invoice.invoice_number}")
         AppDates.parseApiDate(invoice.invoice_date)?.let { appendLine("Tanggal: ${AppDates.display(it)}") }
         appendLine("Customer: ${invoice.customer_name}")
-        appendLine("Status: ${invoice.status}")
+        paymentStatusLine(invoice)?.let { appendLine(it) }
         appendLine()
         invoice.items.forEach { item ->
             appendLine(

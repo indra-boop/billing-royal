@@ -1,8 +1,11 @@
 package id.jerco.billingroyal.data.remote
 
 import java.io.IOException
+import java.net.ConnectException
+import java.net.NoRouteToHostException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
+import javax.net.ssl.SSLHandshakeException
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
@@ -22,12 +25,20 @@ sealed interface AppError {
         val fieldErrors: Map<String, String> = emptyMap(),
     ) : AppError
 
-    data class Network(override val message: String, val timeout: Boolean = false) : AppError
+    /**
+     * @param notSent true bila request PASTI belum sampai ke server (DNS gagal, koneksi ditolak,
+     * handshake TLS gagal). Pada kondisi ini data pasti belum tersimpan, jadi bukan hasil "tidak pasti".
+     */
+    data class Network(
+        override val message: String,
+        val timeout: Boolean = false,
+        val notSent: Boolean = false,
+    ) : AppError
 
     data class Unexpected(override val message: String) : AppError
 }
 
-/** 401 (unauthenticated / invalid_token) atau 403 account_inactive: sesi harus dihapus. */
+/** 401 dengan kode unauthenticated/invalid_token, atau 403 account_inactive: sesi harus dihapus. */
 val AppError.requiresRelogin: Boolean
     get() = this is AppError.Api && ErrorMapper.isSessionTerminating(status, code)
 
@@ -37,9 +48,34 @@ val AppError.requiresRelogin: Boolean
  */
 val AppError.isOutcomeUncertain: Boolean
     get() = when (this) {
-        is AppError.Network, is AppError.Unexpected -> true
+        is AppError.Network -> !notSent
+        is AppError.Unexpected -> true
         is AppError.Api -> status >= 500 && status != 503
     }
+
+/**
+ * Pesan untuk pengguna; untuk error validasi (422) menyertakan rincian per field dari `details`
+ * (mis. "• Nama: wajib diisi").
+ */
+val AppError.displayMessage: String
+    get() {
+        if (this !is AppError.Api || fieldErrors.isEmpty()) return message
+        val lines = fieldErrors.entries
+            .filter { it.value != message }
+            .joinToString("\n") { (field, text) -> "• ${fieldLabel(field)}: $text" }
+        return if (lines.isEmpty()) message else "$message\n$lines"
+    }
+
+private val ITEM_FIELD = Regex("items?[.\\[](\\d+)\\]?[.]?(.*)")
+
+internal fun fieldLabel(field: String): String {
+    ITEM_FIELD.matchEntire(field)?.let { m ->
+        val rest = m.groupValues[2].replace('_', ' ').trim()
+        val number = m.groupValues[1].toInt() + 1
+        return if (rest.isEmpty()) "Item $number" else "Item $number ($rest)"
+    }
+    return field.replace('_', ' ').replaceFirstChar { it.uppercase() }
+}
 
 val AppError.isModuleNotReady: Boolean
     get() = this is AppError.Api && status == 503 && code == "module_not_ready"
@@ -69,9 +105,15 @@ object ErrorMapper {
 
     const val CODE_INVALID_CREDENTIALS = "invalid_credentials"
     const val CODE_ACCOUNT_INACTIVE = "account_inactive"
+    const val CODE_UNAUTHENTICATED = "unauthenticated"
+    const val CODE_INVALID_TOKEN = "invalid_token"
 
+    /**
+     * Hanya kode yang eksplisit dari server yang menghapus sesi. 401 tanpa kode (body kosong, HTML dari
+     * proxy/gateway, JSON tak dikenal) TIDAK menghapus sesi, karena bisa berasal dari perantara.
+     */
     fun isSessionTerminating(status: Int, code: String): Boolean =
-        (status == 401 && code != CODE_INVALID_CREDENTIALS) ||
+        (status == 401 && (code == CODE_UNAUTHENTICATED || code == CODE_INVALID_TOKEN)) ||
             (status == 403 && code == CODE_ACCOUNT_INACTIVE)
 
     /** Memetakan body error envelope { "error": { code, message, details } }. */
@@ -100,7 +142,11 @@ object ErrorMapper {
             fromHttp(t.code(), body)
         }
         is SocketTimeoutException -> AppError.Network("Permintaan melebihi batas waktu. Periksa koneksi internet Anda.", timeout = true)
-        is UnknownHostException -> AppError.Network("Server tidak ditemukan. Periksa koneksi internet Anda.")
+        is UnknownHostException -> AppError.Network("Server tidak ditemukan. Periksa koneksi internet Anda.", notSent = true)
+        is ConnectException, is NoRouteToHostException ->
+            AppError.Network("Tidak dapat terhubung ke server. Periksa koneksi internet Anda.", notSent = true)
+        is SSLHandshakeException ->
+            AppError.Network("Koneksi aman ke server gagal. Periksa tanggal perangkat dan koneksi Anda.", notSent = true)
         is IOException -> AppError.Network("Tidak dapat terhubung ke server. Periksa koneksi internet Anda.")
         is SerializationException -> AppError.Unexpected("Respons server tidak dapat dibaca.")
         is IllegalArgumentException -> AppError.Unexpected("Respons server tidak dapat dibaca.")

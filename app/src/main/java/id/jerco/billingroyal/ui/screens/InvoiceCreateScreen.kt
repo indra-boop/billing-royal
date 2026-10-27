@@ -52,6 +52,8 @@ import id.jerco.billingroyal.core.InvoicePreview
 import id.jerco.billingroyal.core.MoneyFormatter
 import id.jerco.billingroyal.core.MoneyParser
 import id.jerco.billingroyal.data.remote.ApiResult
+import id.jerco.billingroyal.data.remote.AppError
+import id.jerco.billingroyal.data.remote.displayMessage
 import id.jerco.billingroyal.data.remote.CustomerDto
 import id.jerco.billingroyal.data.remote.InvoiceDto
 import id.jerco.billingroyal.data.remote.ServiceDto
@@ -74,6 +76,7 @@ import java.time.LocalDate
 import java.time.YearMonth
 import javax.inject.Inject
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -85,6 +88,10 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+
+private const val RESTORED_UNCERTAIN_MESSAGE =
+    "Pengiriman invoice sebelumnya belum diketahui hasilnya (koneksi terputus, waktu habis, atau aplikasi sempat " +
+        "tertutup). Invoice mungkin SUDAH tersimpan di server. Periksa daftar invoice terlebih dahulu sebelum mengirim ulang."
 
 data class UncertainUi(
     val message: String,
@@ -129,6 +136,14 @@ class InvoiceCreateViewModel @Inject constructor(
     private var storedHash: String? = null
     private val draftMutex = Mutex()
 
+    // Ada percobaan kirim sebelumnya yang hasilnya belum pasti (penanda tersimpan di Room, bertahan setelah proses mati).
+    private var uncertainPending = false
+    // Pengguna sudah menyetujui "Kirim ulang" (konfirmasi kedua) pada sesi layar ini.
+    private var resendConfirmed = false
+    // Draft sudah berhasil dikirim: autosave yang tertunda tidak boleh menghidupkan kembali draft.
+    private var submitted = false
+    private var pricesJob: Job? = null
+
     // ---- picker customer (pencarian di server, debounce 300 ms; baru aktif saat dialog dibuka)
     private val customerQuery = MutableStateFlow<String?>(null)
     private val _customerResults = MutableStateFlow<Load<List<CustomerDto>>>(Load.Loading)
@@ -157,9 +172,11 @@ class InvoiceCreateViewModel @Inject constructor(
             if (draft != null) {
                 storedKey = draft.idempotencyKey
                 storedHash = draft.payloadHash
+                uncertainPending = draft.uncertainSince != null
                 _ui.update {
                     it.copy(
                         restoring = false,
+                        uncertain = if (uncertainPending) UncertainUi(RESTORED_UNCERTAIN_MESSAGE, checking = true) else null,
                         customerId = draft.customerId,
                         customerName = draft.customerName,
                         priceListId = draft.priceListId,
@@ -169,6 +186,7 @@ class InvoiceCreateViewModel @Inject constructor(
                     )
                 }
                 if (draft.customerId != null) loadPrices(draft.priceListId)
+                if (uncertainPending) checkExisting(draft.customerId, draft.invoiceDate)
             } else {
                 _ui.update { it.copy(restoring = false) }
             }
@@ -209,7 +227,8 @@ class InvoiceCreateViewModel @Inject constructor(
 
     fun loadPrices(priceListId: Long? = _ui.value.priceListId) {
         _ui.update { it.copy(pricesLoading = true, pricesError = null) }
-        viewModelScope.launch {
+        pricesJob?.cancel() // respons price list lama tidak boleh menimpa yang baru (customer berganti cepat)
+        pricesJob = viewModelScope.launch {
             when (val r = catalog.priceMap(priceListId)) {
                 is ApiResult.Success -> _ui.update { it.copy(prices = r.data, pricesLoading = false) }
                 is ApiResult.Failure -> _ui.update { it.copy(pricesLoading = false, pricesError = r.error.message) }
@@ -254,6 +273,8 @@ class InvoiceCreateViewModel @Inject constructor(
                 invoices.clearDraft()
                 storedKey = null
                 storedHash = null
+                uncertainPending = false
+                resendConfirmed = false
             }
             _ui.value = InvoiceFormUi(restoring = false)
         }
@@ -277,6 +298,7 @@ class InvoiceCreateViewModel @Inject constructor(
     private fun persist() {
         viewModelScope.launch {
             draftMutex.withLock {
+                if (submitted) return@withLock
                 val s = _ui.value
                 if (s.customerId == null && s.items.isEmpty() && s.notes.isBlank()) invoices.clearDraft()
                 else invoices.saveDraft(currentDraft())
@@ -286,7 +308,13 @@ class InvoiceCreateViewModel @Inject constructor(
 
     /** Simpan: dikunci saat request berjalan; TIDAK ada auto-retry bila hasil tidak pasti. */
     fun save() {
-        if (_ui.value.saving) return
+        if (_ui.value.saving || submitted) return
+        if (uncertainPending && !resendConfirmed) {
+            // Ada percobaan sebelumnya yang hasilnya belum pasti: jangan kirim lagi sebelum pengguna memeriksa daftar.
+            _ui.update { it.copy(uncertain = UncertainUi(RESTORED_UNCERTAIN_MESSAGE, checking = true)) }
+            checkExisting()
+            return
+        }
         _ui.update { it.copy(saving = true, error = null, uncertain = null) }
         viewModelScope.launch {
             val submittedDate = _ui.value.date
@@ -297,6 +325,8 @@ class InvoiceCreateViewModel @Inject constructor(
                 val saved = invoices.loadDraft()
                 storedKey = saved?.idempotencyKey
                 storedHash = saved?.payloadHash
+                uncertainPending = saved?.uncertainSince != null
+                if (r is ApiResult.Success) submitted = true
                 r
             }
             when (result) {
@@ -318,7 +348,13 @@ class InvoiceCreateViewModel @Inject constructor(
                         }
                         checkExisting(submittedCustomer, submittedDate)
                     } else {
-                        _ui.update { it.copy(saving = false, error = result.error.message) }
+                        val err = result.error
+                        val text = if (err is AppError.Network && err.notSent) {
+                            err.message + " Invoice belum tersimpan; coba simpan lagi setelah terhubung."
+                        } else {
+                            err.displayMessage // 422: sertakan rincian per field
+                        }
+                        _ui.update { it.copy(saving = false, error = text) }
                     }
                 }
             }
@@ -350,6 +386,13 @@ class InvoiceCreateViewModel @Inject constructor(
     }
 
     fun dismissUncertain() = _ui.update { it.copy(uncertain = null) }
+
+    /** Konfirmasi KEDUA "Kirim ulang" sudah diberikan pengguna: kirim lagi dengan Idempotency-Key yang sama. */
+    fun confirmResend() {
+        resendConfirmed = true
+        dismissUncertain()
+        save()
+    }
     fun consumeCreated() { _created.value = null }
 }
 
@@ -526,7 +569,9 @@ fun InvoiceCreateScreen(
         UncertainDialog(
             message = u.message,
             onCheck = { viewModel.dismissUncertain(); onCheckList() },
-            onResend = { viewModel.dismissUncertain(); viewModel.save() },
+            onResend = viewModel::confirmResend,
+            resendWarning = "Invoice mungkin sudah tersimpan di server. Mengirim ulang dapat membuat invoice GANDA. " +
+                "Lanjutkan hanya bila Anda sudah memeriksa daftar invoice dan invoice ini belum ada.",
             onDismiss = viewModel::dismissUncertain,
             extra = {
                 when {
@@ -543,6 +588,13 @@ fun InvoiceCreateScreen(
                             Text("Tidak ada invoice customer ini pada tanggal tersebut.")
                         } else {
                             Text("Invoice customer ini hari ini/pada tanggal tersebut:")
+                            Text(
+                                "Bila salah satunya adalah invoice yang barusan Anda simpan, hapus draft ini agar tidak terkirim dua kali.",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            TextButton(onClick = { viewModel.dismissUncertain(); viewModel.discardDraft() }) {
+                                Text("Invoice sudah ada, hapus draft")
+                            }
                             u.matches.take(5).forEach { inv ->
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Text("${inv.invoice_number} - ${MoneyFormatter.format(inv.subtotal)}", Modifier.weight(1f))

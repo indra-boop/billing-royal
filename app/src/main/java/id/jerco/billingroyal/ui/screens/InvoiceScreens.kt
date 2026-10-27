@@ -68,6 +68,7 @@ import id.jerco.billingroyal.ui.components.LabeledValue
 import id.jerco.billingroyal.ui.components.Load
 import id.jerco.billingroyal.ui.components.LoadStateView
 import id.jerco.billingroyal.ui.components.Pager
+import id.jerco.billingroyal.ui.components.SecureScreen
 import id.jerco.billingroyal.ui.components.StatusBadge
 import java.time.YearMonth
 import javax.inject.Inject
@@ -94,7 +95,7 @@ class InvoiceListViewModel @Inject constructor(private val repo: InvoiceReposito
     val status: StateFlow<String?> = _status
     val query: StateFlow<String> = _query
 
-    private val pager = Pager(viewModelScope) { page ->
+    private val pager = Pager(viewModelScope, key = { it.id }) { page ->
         repo.list(_query.value, _month.value, null, _status.value, page)
     }
     val state = pager.state
@@ -155,7 +156,7 @@ fun InvoiceListScreen(
             ) {
                 FilterChip(selected = status == null, onClick = { viewModel.setStatus(null) }, label = { Text("Semua") })
                 InvoiceStatus.ALL.forEach { s ->
-                    FilterChip(selected = status == s, onClick = { viewModel.setStatus(s) }, label = { Text(s) })
+                    FilterChip(selected = status == s, onClick = { viewModel.setStatus(s) }, label = { Text(InvoiceStatus.label(s)) })
                 }
             }
             LoadStateView(
@@ -282,21 +283,28 @@ fun InvoiceDetailScreen(onBack: () -> Unit, viewModel: InvoiceDetailViewModel = 
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val content = (state.load as? Load.Content)?.data
+    SecureScreen()
+    var confirmShareDraft by remember { mutableStateOf<InvoiceDetailData?>(null) }
+
+    fun shareNow(data: InvoiceDetailData) {
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, "Invoice ${data.invoice.invoice_number}")
+            putExtra(Intent.EXTRA_TEXT, InvoiceShareText.build(data.invoice, data.profile))
+        }
+        context.startActivity(Intent.createChooser(send, "Bagikan"))
+    }
+    // Invoice Draft belum final: minta konfirmasi sebelum teksnya dikirim ke pihak lain.
+    fun requestShare(data: InvoiceDetailData) {
+        if (data.invoice.status == InvoiceStatus.DRAFT) confirmShareDraft = data else shareNow(data)
+    }
 
     AppScaffold(
         title = "Detail Invoice",
         onBack = onBack,
         actions = {
             if (content != null) {
-                IconButton(onClick = {
-                    val text = InvoiceShareText.build(content.invoice, content.profile)
-                    val send = Intent(Intent.ACTION_SEND).apply {
-                        type = "text/plain"
-                        putExtra(Intent.EXTRA_SUBJECT, "Invoice ${content.invoice.invoice_number}")
-                        putExtra(Intent.EXTRA_TEXT, text)
-                    }
-                    context.startActivity(Intent.createChooser(send, "Bagikan"))
-                }) { Icon(Icons.Default.Share, contentDescription = "Bagikan") }
+                IconButton(onClick = { requestShare(content) }) { Icon(Icons.Default.Share, contentDescription = "Bagikan") }
             }
         },
     ) { padding ->
@@ -307,22 +315,26 @@ fun InvoiceDetailScreen(onBack: () -> Unit, viewModel: InvoiceDetailViewModel = 
                 onRefresh = { viewModel.load(pull = true) },
                 onRetry = { viewModel.load(pull = false) },
             ) { data ->
-                InvoiceDetailContent(data, state, viewModel, onShare = {
-                    val send = Intent(Intent.ACTION_SEND).apply {
-                        type = "text/plain"
-                        putExtra(Intent.EXTRA_SUBJECT, "Invoice ${data.invoice.invoice_number}")
-                        putExtra(Intent.EXTRA_TEXT, InvoiceShareText.build(data.invoice, data.profile))
-                    }
-                    context.startActivity(Intent.createChooser(send, "Bagikan"))
-                })
+                InvoiceDetailContent(data, state, viewModel, onShare = { requestShare(data) })
             }
         }
+    }
+
+    confirmShareDraft?.let { data ->
+        ConfirmDialog(
+            title = "Bagikan invoice Draft?",
+            message = "Invoice ini masih berstatus Draft (belum final). Teks yang dibagikan akan terkirim ke aplikasi " +
+                "pilihan Anda dan memuat data customer serta rekening pembayaran.",
+            confirmText = "Tetap bagikan",
+            onConfirm = { confirmShareDraft = null; shareNow(data) },
+            onDismiss = { confirmShareDraft = null },
+        )
     }
 
     state.pendingStatus?.let { target ->
         ConfirmDialog(
             title = "Ubah status",
-            message = "Ubah status invoice ke \"$target\"? Tindakan ini dikirim ke server.",
+            message = "Ubah status invoice ke \"${InvoiceStatus.label(target)}\"? Tindakan ini dikirim ke server.",
             confirmText = "Ya, ubah",
             onConfirm = viewModel::confirmStatus,
             onDismiss = viewModel::cancelAsk,
@@ -392,12 +404,7 @@ private fun InvoiceDetailContent(
 
         // Tombol status hanya muncul bila feature flag aktif.
         InvoiceActions.availableTargets(inv.status, viewModel.flags).forEach { target ->
-            val label = when (target) {
-                InvoiceStatus.SENT -> "Tandai Sent"
-                InvoiceStatus.PAID -> "Tandai Paid"
-                InvoiceStatus.CANCELLED -> "Batalkan invoice"
-                else -> target
-            }
+            val label = InvoiceStatus.actionLabel(target)
             OutlinedButton(onClick = { viewModel.askStatus(target) }, enabled = !state.updating, modifier = Modifier.fillMaxWidth()) { Text(label) }
         }
     }

@@ -6,7 +6,18 @@ import id.jerco.billingroyal.data.remote.Meta
 /** Sumber kunci cache ("user_id:business_id"). Diimplementasikan oleh SessionManager. */
 interface ScopeProvider {
     val scopeKey: String
+
+    /** Naik setiap sesi berakhir; request yang dimulai pada generasi lama tidak boleh menulis cache. */
+    val generation: Long get() = 0L
 }
+
+/** Foto kunci cache + generasi, diambil SEBELUM request dikirim. */
+class ScopeTicket(val key: String, val generation: Long)
+
+fun ScopeProvider.ticket() = ScopeTicket(scopeKey, generation)
+
+/** True bila sesi yang sama masih aktif (tidak ada wipe/login baru sejak [ticket] diambil). */
+fun ScopeProvider.isCurrent(ticket: ScopeTicket) = generation == ticket.generation
 
 data class Paged<T>(
     val items: List<T>,

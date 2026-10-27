@@ -55,6 +55,8 @@ import id.jerco.billingroyal.core.IdempotencyKeyHolder
 import id.jerco.billingroyal.core.MoneyFormatter
 import id.jerco.billingroyal.core.MoneyParser
 import id.jerco.billingroyal.data.remote.ApiResult
+import id.jerco.billingroyal.data.remote.AppError
+import id.jerco.billingroyal.data.remote.displayMessage
 import id.jerco.billingroyal.data.remote.ExpenseDto
 import id.jerco.billingroyal.data.remote.InvoiceReportDto
 import id.jerco.billingroyal.data.remote.PaymentMethods
@@ -194,6 +196,8 @@ data class ExpenseFormState(
     val uncertain: Boolean = false,
     val done: Boolean = false,
     val deleting: Boolean = false,
+    /** Expense yang sedang diubah/dihapus ternyata sudah tidak ada di server. */
+    val gone: Boolean = false,
 )
 
 @HiltViewModel
@@ -262,12 +266,24 @@ class ExpenseFormViewModel @Inject constructor(
                     keys.reset()
                     _state.update { it.copy(saving = false, done = true) }
                 }
-                is ApiResult.Failure -> _state.update {
-                    if (editId == null && result.error.isOutcomeUncertain) it.copy(saving = false, uncertain = true)
-                    else it.copy(
-                        saving = false,
-                        error = if (result.error.isModuleNotReady) "Modul pengeluaran belum aktif" else result.error.message,
-                    )
+                is ApiResult.Failure -> {
+                    val err = result.error
+                    if (editId == null && err.isOutcomeUncertain) {
+                        _state.update { it.copy(saving = false, uncertain = true) }
+                    } else if (editId != null && looksLikeNotFound(err) && isGone(editId)) {
+                        _state.update { it.copy(saving = false, gone = true, error = GONE_MESSAGE) }
+                    } else {
+                        _state.update {
+                            it.copy(
+                                saving = false,
+                                error = when {
+                                    err.isModuleNotReady -> "Modul pengeluaran belum aktif"
+                                    err is AppError.Network && err.notSent -> err.message + " Data belum tersimpan."
+                                    else -> err.displayMessage // 422: rincian per field
+                                },
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -278,16 +294,32 @@ class ExpenseFormViewModel @Inject constructor(
         if (!flags.delete || _state.value.deleting) return
         _state.update { it.copy(deleting = true, error = null) }
         viewModelScope.launch {
-            _state.update {
-                when (val r = repo.delete(id)) {
-                    is ApiResult.Success -> it.copy(deleting = false, done = true)
-                    is ApiResult.Failure -> it.copy(deleting = false, error = r.error.message)
-                }
+            when (val r = repo.delete(id)) {
+                is ApiResult.Success -> _state.update { it.copy(deleting = false, done = true) }
+                is ApiResult.Failure ->
+                    if (looksLikeNotFound(r.error) && isGone(id)) {
+                        _state.update { it.copy(deleting = false, gone = true, error = GONE_MESSAGE) }
+                    } else {
+                        _state.update { it.copy(deleting = false, error = r.error.displayMessage) }
+                    }
             }
         }
     }
 
     fun dismissUncertain() = _state.update { it.copy(uncertain = false) }
+
+    /** Server mengembalikan 422 (bukan 404) untuk expense yang tidak ditemukan; 422 tanpa rincian field = kandidat. */
+    private fun looksLikeNotFound(err: AppError) =
+        err is AppError.Api && (err.status == 404 || (err.status == 422 && err.fieldErrors.isEmpty()))
+
+    /** Pastikan dengan GET: bila expense memang tidak ada (404/422), formulir ditandai "sudah tidak ada". */
+    private suspend fun isGone(id: Long): Boolean =
+        (repo.get(id) as? ApiResult.Failure)?.error.let { it is AppError.Api && (it.status == 404 || it.status == 422) }
+
+    private companion object {
+        const val GONE_MESSAGE = "Pengeluaran ini sudah tidak ada di server (mungkin sudah dihapus pengguna lain). " +
+            "Kembali ke daftar lalu muat ulang."
+    }
 }
 
 @Composable
@@ -338,7 +370,11 @@ fun ExpenseFormScreen(onBack: () -> Unit, onCheckList: () -> Unit, viewModel: Ex
                         label = { Text("Catatan") }, minLines = 2, modifier = Modifier.fillMaxWidth(),
                     )
                     s.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                    SavingButton("Simpan", saving = s.saving, enabled = !s.deleting, onClick = viewModel::save)
+                    if (s.gone) {
+                        Button(onClick = onBack, modifier = Modifier.fillMaxWidth()) { Text("Kembali ke daftar") }
+                    } else {
+                        SavingButton("Simpan", saving = s.saving, enabled = !s.deleting, onClick = viewModel::save)
+                    }
                     if (viewModel.isEdit && viewModel.flags.delete) {
                         OutlinedButton(
                             onClick = { confirmDelete = true },

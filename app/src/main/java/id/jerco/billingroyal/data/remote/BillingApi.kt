@@ -26,6 +26,10 @@ interface BillingApi {
     @POST("auth/logout")
     suspend fun logout(): Envelope<LogoutData>
 
+    /** Cabut token tertentu (dipakai setelah data lokal dihapus, atau bila token gagal disimpan). */
+    @POST("auth/logout")
+    suspend fun logoutToken(@Header("Authorization") authorization: String): Envelope<LogoutData>
+
     @GET("me")
     suspend fun me(): Envelope<UserDto>
 

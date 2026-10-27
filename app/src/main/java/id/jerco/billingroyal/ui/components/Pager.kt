@@ -37,6 +37,8 @@ data class PagedState<T>(
 /** Pemuat list berhalaman (infinite scroll + pull-to-refresh). Muat ulang membatalkan permintaan sebelumnya. */
 class Pager<T>(
     private val scope: CoroutineScope,
+    /** Kunci unik item; item dengan kunci sama (server menggeser halaman saat data berubah) tidak ditampilkan dua kali. */
+    private val key: ((T) -> Any)? = null,
     private val fetch: suspend (page: Int) -> ApiResult<Paged<T>>,
 ) {
     private val _state = MutableStateFlow(PagedState<T>())
@@ -54,7 +56,7 @@ class Pager<T>(
         job = scope.launch {
             when (val result = fetch(1)) {
                 is ApiResult.Success -> _state.value = PagedState(
-                    items = result.data.items,
+                    items = dedup(result.data.items),
                     loading = false,
                     hasMore = result.data.hasMore,
                     fromCache = result.data.fromCache,
@@ -67,6 +69,8 @@ class Pager<T>(
         }
     }
 
+    private fun dedup(list: List<T>): List<T> = key?.let { k -> list.distinctBy(k) } ?: list
+
     fun loadMore() {
         val s = _state.value
         if (s.loading || s.refreshing || s.loadingMore || !s.hasMore || s.error != null) return
@@ -77,7 +81,7 @@ class Pager<T>(
             when (val result = fetch(s.page + 1)) {
                 is ApiResult.Success -> _state.update {
                     it.copy(
-                        items = it.items + result.data.items,
+                        items = dedup(it.items + result.data.items),
                         loadingMore = false,
                         hasMore = result.data.hasMore,
                         page = result.data.page,
