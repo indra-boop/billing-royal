@@ -110,7 +110,7 @@ Lalu isi Settings > Secrets and variables > Actions:
   upload-artifact v4.6.2; komentar versi ada di workflow). Perbarui SHA secara berkala (mis. Dependabot).
 - `gradle/wrapper/gradle-wrapper.properties` memuat `distributionSha256Sum` Gradle 9.8.2
   (`21bd5da2...9607`, cocok dengan checksum resmi services.gradle.org). Verifikasi checksum dependency
-  (`gradle/verification-metadata.xml`) belum dibuat.
+  aktif lewat `gradle/verification-metadata.xml` (SHA-256; cara memperbaruinya ada di ASSUMPTIONS.md).
 
 ## Arsitektur singkat
 
@@ -124,7 +124,8 @@ Lalu isi Settings > Secrets and variables > Actions:
   Request lain yang masih berjalan dibatalkan dan penulisan cache dari sesi lama ditolak (penghitung generasi sesi).
 - Logout: data lokal dihapus lebih dulu (tidak menunggu jaringan, tidak dapat dibatalkan), baru token dicabut di server
   secara best-effort (timeout 5 detik). Kegagalan Keystore saat login menampilkan pesan jelas dan mencabut token yang baru terbit.
-- Setiap POST create mengirim `Idempotency-Key` (UUID v4) yang dibuat sekali per payload dan dipakai ulang saat kirim ulang.
+- Setiap POST create mengirim `Idempotency-Key` (UUID v4) yang dibuat sekali per payload dan dipakai ulang saat kirim ulang
+  (invoice di draft Room; customer/expense di tabel Room `pending_idempotency`, bertahan setelah proses mati).
   Pada timeout/network error setelah submit invoice tidak ada auto-retry; pengguna diminta memeriksa daftar invoice dulu.
   Dialog "Status penyimpanan belum pasti": aksi utama "Periksa daftar"; "Kirim ulang" butuh konfirmasi kedua. Penanda
   "belum pasti" disimpan di draft Room (DB v2, migrasi 1->2 tanpa membuang draft) sehingga dialog muncul lagi setelah proses mati.
