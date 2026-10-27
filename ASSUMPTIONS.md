@@ -172,4 +172,46 @@ Batasan dan keputusan yang membutuhkan pemilik:
 - Pembulatan preview per baris (F2/BR-01), format kirim number-vs-string invoice (F1), batas atas nominal, K-2 (pencatatan pembayaran),
   K-3/K-4 (profil/rekening basi), role-based UI (A-02), 
 - Pesan error server ditampilkan apa adanya (A-08/SMV-12).
-- Daftar customer/pengeluaran tidak otomatis menyegarkan saat kembali dari form (Home sudah).
+- (Diperbaiki di bagian UI/UX di bawah) daftar customer/invoice/pengeluaran kini menyegarkan saat layar kembali aktif.
+
+## Review UI/UX (ui-designer 20 temuan, ux-designer 23 temuan): yang dikerjakan dan yang ditunda
+
+Semua perubahan hanya di lapisan tampilan; aturan wajib 1-11 tidak diubah. **Belum diuji di perangkat/emulator** (hanya kompilasi + unit test;
+tidak ada UI test): tata letak, fokus/TalkBack, IME/autofill, `imePadding` pada bilah Simpan, dan warna kontras perlu dicek manual.
+
+**Dikerjakan**
+- UI-01 `Surface(color = background)` membungkus `AppNavHost`; UI-02 spinner `SavingButton` memakai `LocalContentColor` dan tombol tidak lagi redup
+  saat menyimpan (klik diblokir, `stateDescription` "Menyimpan"); UI-03 `contentPadding` bawah 88dp di daftar ber-FAB; UI-06 baris picker/daftar min 48dp
+  dan field cari otomatis fokus + `ImeAction.Search` + tombol Hapus teks; UI-07/08 galat dekat sumbernya dengan `liveRegion`, `ImeAction`, kapitalisasi,
+  autofill (`contentType`) dan tombol teks Tampilkan/Sembunyikan kata sandi; UI-09/UX-13 rentang Rekap tidak valid menyembunyikan data lama;
+  UI-10 banner offline sama di semua daftar (`LoadStateView(fromCache)`) dan Akun memakai sesi cache; UI-11 ukuran spinner seragam; UI-13 aksi hapus
+  berwarna error + konfirmasi `destructive`; UI-15 empty state punya tombol ajakan; UI-16 catatan "harga belum final" tidak lagi berwarna error;
+  UI-17 teks baris daftar dibatasi 2 baris + ellipsis; UI-18 `strings.xml` dibersihkan (tanpa `*`, spasi pinggir, string tak terpakai); UI-19 Home
+  memakai tombol tonal dan Akun pindah ke app bar; UI-04 warna status/peringatan mengikuti mode terang/gelap aplikasi (`LocalDarkTheme`).
+- UX-01 Home selalu menampilkan menu; ringkasan punya status sendiri + Coba lagi; kartu "Lanjutkan draft invoice" dari data lokal.
+- UX-02 (sebagian): pesan Login berasal dari `SessionNoticeCard` (ringkas, bisa ditutup, `liveRegion`). **Keputusan pemilik:** mempertahankan draft
+  saat forced logout (401/403) bertentangan dengan aturan wipe Room/DataStore, maka TIDAK diubah; penghapusan tetap sesuai spesifikasi.
+- UX-03/15 dialog "belum pasti": jam dibuat + subtotal + penanda "kemungkinan besar ini", tombol "Ini invoicenya, hapus draft" dengan konfirmasi,
+  catatan pencarian hanya 50 invoice terbaru, tombol "Periksa invoice" utama, "Kirim ulang..." butuh konfirmasi kedua, "Nanti" menjelaskan draft tetap ada.
+- UX-04 Splash gagal jaringan: Coba lagi; tidak ada wipe otomatis; "Keluar dan hapus data perangkat" meminta konfirmasi.
+- UX-06/17 bilah bawah tetap (perkiraan + Simpan + galat + alasan Simpan nonaktif) di Buat Invoice dan form; hapus item bisa Urungkan (Snackbar).
+- UX-07 (sebagian) "Buat invoice" dari Daftar kembali ke layar Buat yang ada di bawahnya (tanpa menumpuk). UX-08 daftar menyegarkan saat kembali aktif.
+- UX-09 Back saat menyimpan meminta konfirmasi; pesan "koneksi lambat" setelah 8 detik. UX-10 `liveRegion`/heading pada galat, notifikasi, status.
+- UX-11 Login: IME Next/Done, autofill, Tampilkan/Sembunyikan, pesan 401/429 diterjemahkan. UX-12 (sebagian) peringatan "Buang perubahan?" saat Back.
+- UX-16 (sebagian) catatan "20 customer pertama" di picker. UX-18 contentDescription "Hapus <nama item>". UX-19 Akun tetap bisa Keluar saat offline (data cache).
+- UX-20 (sebagian) istilah "Hapus draft" seragam. UX-23 pratinjau "Dibaca sebagai" untuk nominal pengeluaran.
+
+**Ditunda (alasan)**
+- UX-05 pilih banyak item sekaligus / pintasan customer terakhir: perubahan alur, perlu keputusan produk.
+- UX-04 butir "masuk Home saat offline": bertentangan dengan online-first/server authoritative.
+- UX-07 teruskan filter (customer/tanggal) ke Daftar Invoice dan UX-16 tombol "Tambah customer baru" di picker: perlu perubahan argumen navigasi/alur form.
+- UX-12 pemulihan isian form setelah proses dimatikan sistem: butuh penyimpanan draft form (bertentangan dengan aturan tanpa data sensitif lokal tambahan bila tidak diputuskan pemilik).
+- UX-14 satu tombol Bagikan tanpa dialog untuk Draft: dialog T16 (review Hacker) sengaja dipertahankan.
+- UX-20 glosarium istilah penuh dan UX-22 penanda cache pada picker: perlu keputusan istilah / data sumber cache.
+- UX-21/UI-20/UI-17 (font scaling, layar lebar, `adjustResize` + `imePadding`): perlu verifikasi di perangkat; UI-05 sisa string Kotlin (pesan galat VM
+  dan beberapa dialog Bagikan) belum dipindah ke `strings.xml`; UI-12 tinggi tombol dirapikan sebagian; UI-14 format uang tidak diubah.
+- UI-04 skema warna lengkap (extended color roles/harmonize) dan keputusan dynamic color tetap ON (menunggu pemilik; warna status tetap tetap).
+- Ikon/logo: opsi A/B/C menunggu pemilik; aset konsep hanya referensi, ikon tidak diganti. `applicationId` tidak diubah.
+
+**Keputusan pemilik yang masih terbuka:** logo asli, aturan pembulatan server, certificate pinning, SQLCipher, GitHub Environment `release`,
+dynamic color ON/OFF, dua splash (API 31+ vs bawah), mempertahankan draft saat forced logout (konflik dengan aturan wipe).
