@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Warna merek SEMENTARA (placeholder); ganti setelah pemilik menyerahkan palet/logo asli. -->
+    <color name="brand_seed">#0B5FA5</color>
+    <color name="window_background">#F9F9FE</color>
+</resources>

@@ -1,5 +1,15 @@
 package id.jerco.billingroyal.ui.components
 
+import androidx.compose.ui.res.stringResource
+import id.jerco.billingroyal.R
+import androidx.compose.ui.unit.Dp
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.res.colorResource
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.background
+import androidx.compose.foundation.Image
 import id.jerco.billingroyal.data.remote.InvoiceStatus
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -47,8 +57,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import id.jerco.billingroyal.core.AppDates
 import id.jerco.billingroyal.ui.theme.StatusColors
-import id.jerco.billingroyal.ui.theme.WarningContainer
-import id.jerco.billingroyal.ui.theme.WarningContent
+import id.jerco.billingroyal.ui.theme.WarningColors
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
@@ -70,7 +79,7 @@ fun AppScaffold(
                 navigationIcon = {
                     if (onBack != null) {
                         IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Kembali")
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.kembali))
                         }
                     }
                 },
@@ -103,12 +112,12 @@ fun <T> LoadStateView(
             Load.Loading -> CenteredScroll {
                 CircularProgressIndicator()
                 Spacer(Modifier.height(12.dp))
-                Text("Memuat...")
+                Text(stringResource(R.string.memuat))
             }
             is Load.Error -> CenteredScroll {
                 Text(state.message, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.error)
                 Spacer(Modifier.height(12.dp))
-                Button(onClick = onRetry) { Text("Coba lagi") }
+                Button(onClick = onRetry) { Text(stringResource(R.string.coba_lagi)) }
             }
             is Load.Content -> if (isEmpty(state.data)) {
                 CenteredScroll { Text(emptyMessage, style = MaterialTheme.typography.bodyLarge) }
@@ -151,7 +160,7 @@ fun StatusBadge(status: String, modifier: Modifier = Modifier) {
 /** Peringatan kuning (mis. harga item bernilai 0). */
 @Composable
 fun WarningBox(message: String, modifier: Modifier = Modifier) {
-    Surface(modifier = modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), color = WarningContainer, contentColor = WarningContent) {
+    Surface(modifier = modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), color = WarningColors.container, contentColor = WarningColors.content) {
         Text(message, modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium)
     }
 }
@@ -180,7 +189,7 @@ fun ConfirmDialog(
         title = { Text(title) },
         text = { Text(message) },
         confirmButton = { TextButton(onClick = onConfirm) { Text(confirmText) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Batal") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.batal)) } },
     )
 }
 
@@ -203,27 +212,27 @@ fun UncertainDialog(
     if (confirmResend) {
         AlertDialog(
             onDismissRequest = { confirmResend = false },
-            title = { Text("Kirim ulang?") },
+            title = { Text(stringResource(R.string.kirim_ulang)) },
             text = { Text(resendWarning) },
-            confirmButton = { TextButton(onClick = { confirmResend = false; onResend() }) { Text("Ya, kirim ulang") } },
-            dismissButton = { Button(onClick = { confirmResend = false }) { Text("Batal") } },
+            confirmButton = { TextButton(onClick = { confirmResend = false; onResend() }) { Text(stringResource(R.string.ya_kirim_ulang)) } },
+            dismissButton = { Button(onClick = { confirmResend = false }) { Text(stringResource(R.string.batal)) } },
         )
         return
     }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Status penyimpanan belum pasti") },
+        title = { Text(stringResource(R.string.status_penyimpanan_belum_pasti)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(message)
                 extra()
             }
         },
-        confirmButton = { Button(onClick = onCheck) { Text("Periksa daftar") } },
+        confirmButton = { Button(onClick = onCheck) { Text(stringResource(R.string.periksa_daftar)) } },
         dismissButton = {
             Row {
-                TextButton(onClick = { confirmResend = true }) { Text("Kirim ulang") }
-                TextButton(onClick = onDismiss) { Text("Tutup") }
+                TextButton(onClick = { confirmResend = true }) { Text(stringResource(R.string.kirim_ulang_2)) }
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.tutup)) }
             }
         },
     )
@@ -252,9 +261,9 @@ fun DateField(
                         onDateChange(Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate())
                     }
                     open = false
-                }) { Text("Pilih") }
+                }) { Text(stringResource(R.string.pilih)) }
             },
-            dismissButton = { TextButton(onClick = { open = false }) { Text("Batal") } },
+            dismissButton = { TextButton(onClick = { open = false }) { Text(stringResource(R.string.batal)) } },
         ) { DatePicker(state = state) }
     }
 }
@@ -273,7 +282,7 @@ fun SavingButton(text: String, saving: Boolean, enabled: Boolean = true, onClick
         if (saving) {
             CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
             Spacer(Modifier.size(8.dp))
-            Text("Menyimpan...")
+            Text(stringResource(R.string.menyimpan))
         } else {
             Text(text)
         }
@@ -283,4 +292,20 @@ fun SavingButton(text: String, saving: Boolean, enabled: Boolean = true, onClick
 @Composable
 fun CenteredBox(content: @Composable () -> Unit) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { content() }
+}
+
+
+/** Tinggi minimum 48dp untuk aksi utama (target sentuh Material/Android a11y). */
+fun Modifier.minTouch(): Modifier = this.heightIn(min = 48.dp)
+
+/**
+ * Tanda merek PLACEHOLDER (huruf "B" di atas warna seed). Dipakai di Login dan sebagai cadangan bila bisnis belum punya logo.
+ * Bukan logo laundry asli: ganti drawable `ic_launcher_foreground`/warna `brand_seed` setelah pemilik menyerahkan asetnya.
+ * Dekoratif (contentDescription null) karena nama aplikasi/bisnis selalu tampil di dekatnya.
+ */
+@Composable
+fun BrandMark(modifier: Modifier = Modifier, size: Dp = 72.dp) {
+    Box(modifier.size(size).clip(CircleShape).background(colorResource(R.color.brand_seed))) {
+        Image(painterResource(R.drawable.ic_launcher_foreground), contentDescription = null, modifier = Modifier.size(size))
+    }
 }

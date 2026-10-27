@@ -1,8 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- Tema terang (default). Varian gelap ada di values-night. Warna jendela mengikuti mode agar tidak berkedip putih. -->
     <style name="Theme.BillingRoyal" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowBackground">@color/window_background</item>
+    </style>
+
+    <!-- Tema peluncuran (Splash Screen API). Setelah splash, Activity memakai Theme.BillingRoyal. -->
+    <style name="Theme.BillingRoyal.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/brand_seed</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
+        <item name="postSplashScreenTheme">@style/Theme.BillingRoyal</item>
     </style>
 </resources>

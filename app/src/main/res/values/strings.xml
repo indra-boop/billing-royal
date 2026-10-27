@@ -2,4 +2,133 @@
 <resources>
     <string name="app_name">Billing Royal</string>
     <string name="logo_description">Logo laundry</string>
+
+    <!-- Common.kt -->
+    <string name="kembali">Kembali</string>
+    <string name="memuat">Memuat...</string>
+    <string name="coba_lagi">Coba lagi</string>
+    <string name="batal">Batal</string>
+    <string name="kirim_ulang">Kirim ulang?</string>
+    <string name="ya_kirim_ulang">Ya, kirim ulang</string>
+    <string name="status_penyimpanan_belum_pasti">Status penyimpanan belum pasti</string>
+    <string name="periksa_daftar">Periksa daftar</string>
+    <string name="kirim_ulang_2">Kirim ulang</string>
+    <string name="tutup">Tutup</string>
+    <string name="pilih">Pilih</string>
+    <string name="menyimpan">Menyimpan...</string>
+
+    <!-- AuthScreens.kt -->
+    <string name="masuk_ulang">Masuk ulang</string>
+    <string name="masuk_sebagai_operator">Masuk sebagai operator</string>
+    <string name="username">Username</string>
+    <string name="password">Password</string>
+    <string name="masuk">Masuk</string>
+
+    <!-- HomeAccountScreens.kt -->
+    <string name="buat_invoice">Buat Invoice</string>
+    <string name="customer">Customer</string>
+    <string name="pengeluaran">Pengeluaran</string>
+    <string name="daftar_invoice">Daftar Invoice</string>
+    <string name="rekap">Rekap</string>
+    <string name="akun">Akun</string>
+    <string name="keluar">Keluar</string>
+    <string name="draft_invoice_yang_belum_disimpan">Draft invoice yang belum disimpan akan hilang, dan semua data lokal dihapus dari perangkat ini. Lanjut keluar?</string>
+
+    <!-- InvoiceScreens.kt -->
+    <string name="buat_invoice_2">Buat invoice</string>
+    <string name="cari_nomor_invoice_atau_customer">Cari nomor invoice atau customer</string>
+    <string name="semua">Semua</string>
+    <string name="tidak_ada_invoice_pada_filter">Tidak ada invoice pada filter ini.</string>
+    <string name="bulan_sebelumnya">Bulan sebelumnya</string>
+    <string name="bulan_berikutnya">Bulan berikutnya</string>
+    <string name="sisa">Sisa </string>
+    <string name="detail_invoice">Detail Invoice</string>
+    <string name="bagikan">Bagikan</string>
+    <string name="tetap_bagikan">Tetap bagikan</string>
+    <string name="ubah_status">Ubah status</string>
+    <string name="ya_ubah">Ya, ubah</string>
+    <string name="item">Item</string>
+
+    <!-- InvoiceCreateScreen.kt -->
+    <string name="mencocokkan_draft_dengan_data_terbaru">  Mencocokkan draft dengan data terbaru...</string>
+    <string name="belum_ada_item">Belum ada item.</string>
+    <string name="hapus_item">Hapus item</string>
+    <string name="qty">Qty</string>
+    <string name="lebih_dari_0_maksimal_2">Lebih dari 0, maksimal 2 desimal</string>
+    <string name="harga_satuan_khusus_opsional">Harga satuan khusus (opsional)</string>
+    <string name="nominal_tidak_valid_contoh_15000">Nominal tidak valid. Contoh: 15.000 atau 15.000,50</string>
+    <string name="dibaca_sebagai">Dibaca sebagai </string>
+    <string name="perkiraan_jumlah_belum_final">Perkiraan jumlah (belum final): </string>
+    <string name="tambah_item_dari_katalog">Tambah item dari katalog</string>
+    <string name="catatan">Catatan</string>
+    <string name="perkiraan_subtotal_preview">Perkiraan subtotal (preview)</string>
+    <string name="invoice_baru_selalu_disimpan_dengan">Invoice baru selalu disimpan dengan status Draft.</string>
+    <string name="simpan">Simpan</string>
+    <string name="kosongkan_draft">Kosongkan draft</string>
+    <string name="pilih_customer">Pilih customer</string>
+    <string name="pilih_item">Pilih item</string>
+    <string name="draft_invoice_lokal_akan_dihapus">Draft invoice lokal akan dihapus.</string>
+    <string name="kosongkan">Kosongkan</string>
+    <string name="memeriksa_daftar_invoice">  Memeriksa daftar invoice...</string>
+    <string name="periksa_lagi">Periksa lagi</string>
+    <string name="tidak_ada_invoice_customer_ini">Tidak ada invoice customer ini pada tanggal tersebut.</string>
+    <string name="invoice_customer_ini_hari_inipada">Invoice customer ini hari ini/pada tanggal tersebut:</string>
+    <string name="invoice_sudah_ada_hapus_draft">Invoice sudah ada, hapus draft</string>
+    <string name="cari">Cari</string>
+    <string name="tidak_ada_hasil">Tidak ada hasil.</string>
+
+    <!-- CustomerScreens.kt -->
+    <string name="tambah_customer">Tambah customer</string>
+    <string name="cari_nama_atau_telepon">Cari nama atau telepon</string>
+    <string name="detail_customer">Detail Customer</string>
+    <string name="ubah">Ubah</string>
+    <string name="hapus_customer">Hapus customer</string>
+    <string name="customer_ini_akan_dihapus_customer">Customer ini akan dihapus. Customer yang sudah punya invoice tidak dapat dihapus.</string>
+    <string name="hapus">Hapus</string>
+    <string name="nama">Nama *</string>
+    <string name="email">Email</string>
+    <string name="telepon">Telepon</string>
+    <string name="alamat">Alamat</string>
+    <string name="koneksi_terputus_atau_waktu_habis">Koneksi terputus atau waktu habis setelah data dikirim. Customer mungkin sudah tersimpan. </string>
+    <string name="price_list">Price list</string>
+    <string name="tanpa_price_list">Tanpa price list</string>
+
+    <!-- ExpenseReportScreens.kt -->
+    <string name="tambah_pengeluaran">Tambah pengeluaran</string>
+    <string name="total_bulan_ini">Total bulan ini</string>
+    <string name="belum_ada_pengeluaran_pada_bulan">Belum ada pengeluaran pada bulan ini.</string>
+    <string name="kategori">Kategori *</string>
+    <string name="deskripsi">Deskripsi *</string>
+    <string name="nominal_rp">Nominal (Rp) *</string>
+    <string name="penerima">Penerima</string>
+    <string name="kembali_ke_daftar">Kembali ke daftar</string>
+    <string name="koneksi_terputus_atau_waktu_habis_2">Koneksi terputus atau waktu habis setelah data dikirim. Pengeluaran mungkin sudah tersimpan. </string>
+    <string name="hapus_pengeluaran">Hapus pengeluaran</string>
+    <string name="pengeluaran_ini_akan_dihapus">Pengeluaran ini akan dihapus.</string>
+    <string name="metode_bayar">Metode bayar *</string>
+    <string name="rentang_maksimal_31_hari">Rentang maksimal 31 hari.</string>
+    <string name="tidak_ada_invoice_pada_rentang">Tidak ada invoice pada rentang ini.</string>
+    <string name="ringkasan">Ringkasan</string>
+
+    <!-- Argumen posisional (komponen bersama) -->
+    <string name="jumlah_invoice">Jumlah invoice</string>
+    <string name="total_qty">Total qty</string>
+    <string name="total_invoice">Total invoice</string>
+    <string name="total_dibayar">Total dibayar</string>
+    <string name="total_sisa">Total sisa</string>
+    <string name="nama_2">Nama</string>
+    <string name="peran">Peran</string>
+    <string name="laundry">Laundry</string>
+    <string name="kode_laundry">Kode laundry</string>
+    <string name="tanggal">Tanggal</string>
+    <string name="subtotal">Subtotal</string>
+    <string name="dibayar">Dibayar</string>
+    <string name="sisa_2">Sisa</string>
+    <string name="customer_ini_belum_memiliki_price">Customer ini belum memiliki price list, sehingga harga item tidak ditemukan (preview Rp 0).</string>
+    <string name="tidak_ada_koneksi_menampilkan_data">Tidak ada koneksi. Menampilkan data tersimpan.</string>
+    <string name="dari">Dari</string>
+    <string name="sampai">Sampai</string>
+
+    <string name="nominal_tidak_valid_hint">Nominal tidak valid. Contoh: 15.000 atau 15.000,50</string>
+    <string name="nominal_contoh_hint">Contoh: 15.000</string>
 </resources>

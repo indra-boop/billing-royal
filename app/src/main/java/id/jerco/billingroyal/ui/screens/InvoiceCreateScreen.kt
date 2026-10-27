@@ -1,5 +1,9 @@
 package id.jerco.billingroyal.ui.screens
 
+import androidx.compose.ui.semantics.Role
+import id.jerco.billingroyal.ui.components.minTouch
+import id.jerco.billingroyal.R
+import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -494,7 +498,7 @@ fun InvoiceCreateScreen(
         InvoicePreview.compute(ui.items, ui.prices, flags, pricesKnown)
     }
 
-    AppScaffold(title = "Buat Invoice", onBack = onBack) { padding ->
+    AppScaffold(title = stringResource(R.string.buat_invoice), onBack = onBack) { padding ->
         if (ui.restoring) {
             Box(Modifier.padding(padding).fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
             return@AppScaffold
@@ -506,30 +510,30 @@ fun InvoiceCreateScreen(
             OutlinedButton(
                 onClick = { viewModel.openCustomerPicker(); pickCustomer = true },
                 enabled = !ui.saving,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().minTouch(),
             ) { Text(ui.customerName?.let { "Customer: $it" } ?: "Pilih customer") }
 
-            DateField("Tanggal", ui.date, viewModel::setDate, Modifier.fillMaxWidth(), enabled = !ui.saving)
+            DateField(stringResource(R.string.tanggal), ui.date, viewModel::setDate, Modifier.fillMaxWidth(), enabled = !ui.saving)
 
             ui.draftNotice?.let { WarningBox(it) }
             if (ui.draftChecking) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                    Text("  Mencocokkan draft dengan data terbaru...", style = MaterialTheme.typography.bodySmall)
+                    Text(stringResource(R.string.mencocokkan_draft_dengan_data_terbaru), style = MaterialTheme.typography.bodySmall)
                 }
             }
             if (ui.customerId != null && ui.priceListId == null) {
-                WarningBox("Customer ini belum memiliki price list, sehingga harga item tidak ditemukan (preview Rp 0).")
+                WarningBox(stringResource(R.string.customer_ini_belum_memiliki_price))
             }
             ui.pricesError?.let { msg ->
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text("Harga tidak dapat dimuat: $msg", color = MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f))
-                    TextButton(onClick = { viewModel.loadPrices() }) { Text("Coba lagi") }
+                    TextButton(onClick = { viewModel.loadPrices() }) { Text(stringResource(R.string.coba_lagi)) }
                 }
             }
 
             Text("Item (${ui.items.size}/${InvoiceRepository.MAX_ITEMS})", style = MaterialTheme.typography.titleMedium)
-            if (ui.items.isEmpty()) Text("Belum ada item.", style = MaterialTheme.typography.bodyMedium)
+            if (ui.items.isEmpty()) Text(stringResource(R.string.belum_ada_item), style = MaterialTheme.typography.bodyMedium)
             preview.lines.forEachIndexed { index, line ->
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -547,16 +551,16 @@ fun InvoiceCreateScreen(
                                 )
                             }
                             IconButton(onClick = { viewModel.removeItem(index) }, enabled = !ui.saving) {
-                                Icon(Icons.Default.Delete, contentDescription = "Hapus item")
+                                Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.hapus_item))
                             }
                         }
                         OutlinedTextField(
                             value = line.item.qtyText,
                             onValueChange = { viewModel.setQty(index, it) },
-                            label = { Text("Qty" + if (line.item.unit.isNotBlank()) " (${line.item.unit})" else "") },
+                            label = { Text(stringResource(R.string.qty) + if (line.item.unit.isNotBlank()) " (${line.item.unit})" else "") },
                             singleLine = true,
                             isError = line.qty == null,
-                            supportingText = { if (line.qty == null) Text("Lebih dari 0, maksimal 2 desimal") },
+                            supportingText = { if (line.qty == null) Text(stringResource(R.string.lebih_dari_0_maksimal_2)) },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                             modifier = Modifier.fillMaxWidth(),
                         )
@@ -564,34 +568,34 @@ fun InvoiceCreateScreen(
                             OutlinedTextField(
                                 value = line.item.overridePriceText,
                                 onValueChange = { viewModel.setOverridePrice(index, it) },
-                                label = { Text("Harga satuan khusus (opsional)") },
+                                label = { Text(stringResource(R.string.harga_satuan_khusus_opsional)) },
                                 singleLine = true,
                                 isError = line.item.overridePriceText.isNotBlank() && MoneyParser.parseAmount(line.item.overridePriceText) == null,
                                 supportingText = {
                                     val parsed = MoneyParser.parseAmount(line.item.overridePriceText)
                                     when {
                                         line.item.overridePriceText.isBlank() -> Unit
-                                        parsed == null -> Text("Nominal tidak valid. Contoh: 15.000 atau 15.000,50")
-                                        else -> Text("Dibaca sebagai " + MoneyFormatter.format(parsed))
+                                        parsed == null -> Text(stringResource(R.string.nominal_tidak_valid_contoh_15000))
+                                        else -> Text(stringResource(R.string.dibaca_sebagai) + MoneyFormatter.format(parsed))
                                     }
                                 },
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                 modifier = Modifier.fillMaxWidth(),
                             )
                         }
-                        Text("Perkiraan jumlah (belum final): " + MoneyFormatter.format(line.amount), style = MaterialTheme.typography.bodySmall)
+                        Text(stringResource(R.string.perkiraan_jumlah_belum_final) + MoneyFormatter.format(line.amount), style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }
             OutlinedButton(
                 onClick = { viewModel.openServicePicker(); pickService = true },
                 enabled = !ui.saving && ui.items.size < InvoiceRepository.MAX_ITEMS,
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("Tambah item dari katalog") }
+                modifier = Modifier.fillMaxWidth().minTouch(),
+            ) { Text(stringResource(R.string.tambah_item_dari_katalog)) }
             ui.itemNotice?.let { msg ->
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(msg, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
-                    TextButton(onClick = viewModel::dismissItemNotice) { Text("Tutup") }
+                    TextButton(onClick = viewModel::dismissItemNotice) { Text(stringResource(R.string.tutup)) }
                 }
             }
 
@@ -607,14 +611,14 @@ fun InvoiceCreateScreen(
             OutlinedTextField(
                 value = ui.notes,
                 onValueChange = viewModel::setNotes,
-                label = { Text("Catatan") },
+                label = { Text(stringResource(R.string.catatan)) },
                 minLines = 2,
                 modifier = Modifier.fillMaxWidth(),
             )
 
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(12.dp)) {
-                    Text("Perkiraan subtotal (preview)", style = MaterialTheme.typography.labelMedium)
+                    Text(stringResource(R.string.perkiraan_subtotal_preview), style = MaterialTheme.typography.labelMedium)
                     Text(MoneyFormatter.format(preview.subtotal), style = MaterialTheme.typography.titleLarge)
                     Text(
                         "Hanya perkiraan: server yang menentukan subtotal dan total final (termasuk pembulatan).",
@@ -630,22 +634,22 @@ fun InvoiceCreateScreen(
                 }
             }
 
-            Text("Invoice baru selalu disimpan dengan status Draft.", style = MaterialTheme.typography.bodySmall)
+            Text(stringResource(R.string.invoice_baru_selalu_disimpan_dengan), style = MaterialTheme.typography.bodySmall)
             ui.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             SavingButton(
-                text = "Simpan",
+                text = stringResource(R.string.simpan),
                 saving = ui.saving,
                 enabled = ui.customerId != null && ui.items.isNotEmpty(),
                 onClick = viewModel::save,
             )
-            TextButton(onClick = { confirmDiscard = true }, enabled = !ui.saving) { Text("Kosongkan draft") }
+            TextButton(onClick = { confirmDiscard = true }, enabled = !ui.saving) { Text(stringResource(R.string.kosongkan_draft)) }
         }
     }
 
     if (pickCustomer) {
         val results by viewModel.customerResults.collectAsStateWithLifecycle()
         SearchPickerDialog(
-            title = "Pilih customer",
+            title = stringResource(R.string.pilih_customer),
             state = results,
             onQuery = viewModel::searchCustomers,
             serverSearch = true,
@@ -660,7 +664,7 @@ fun InvoiceCreateScreen(
     if (pickService) {
         val services by viewModel.services.collectAsStateWithLifecycle()
         SearchPickerDialog(
-            title = "Pilih item",
+            title = stringResource(R.string.pilih_item),
             state = services,
             onQuery = {},
             serverSearch = false,
@@ -677,9 +681,9 @@ fun InvoiceCreateScreen(
     }
     if (confirmDiscard) {
         ConfirmDialog(
-            title = "Kosongkan draft",
-            message = "Draft invoice lokal akan dihapus.",
-            confirmText = "Kosongkan",
+            title = stringResource(R.string.kosongkan_draft),
+            message = stringResource(R.string.draft_invoice_lokal_akan_dihapus),
+            confirmText = stringResource(R.string.kosongkan),
             onConfirm = { confirmDiscard = false; viewModel.discardDraft() },
             onDismiss = { confirmDiscard = false },
         )
@@ -696,23 +700,23 @@ fun InvoiceCreateScreen(
                 when {
                     u.checking -> Row(verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(Modifier.height(18.dp), strokeWidth = 2.dp)
-                        Text("  Memeriksa daftar invoice...")
+                        Text(stringResource(R.string.memeriksa_daftar_invoice))
                     }
                     u.checkError != null -> Column {
                         Text(u.checkError, color = MaterialTheme.colorScheme.error)
-                        TextButton(onClick = { viewModel.checkExisting() }) { Text("Periksa lagi") }
+                        TextButton(onClick = { viewModel.checkExisting() }) { Text(stringResource(R.string.periksa_lagi)) }
                     }
                     u.matches != null -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         if (u.matches.isEmpty()) {
-                            Text("Tidak ada invoice customer ini pada tanggal tersebut.")
+                            Text(stringResource(R.string.tidak_ada_invoice_customer_ini))
                         } else {
-                            Text("Invoice customer ini hari ini/pada tanggal tersebut:")
+                            Text(stringResource(R.string.invoice_customer_ini_hari_inipada))
                             Text(
                                 "Bila salah satunya adalah invoice yang barusan Anda simpan, hapus draft ini agar tidak terkirim dua kali.",
                                 style = MaterialTheme.typography.bodySmall,
                             )
                             TextButton(onClick = { viewModel.dismissUncertain(); viewModel.discardDraft() }) {
-                                Text("Invoice sudah ada, hapus draft")
+                                Text(stringResource(R.string.invoice_sudah_ada_hapus_draft))
                             }
                             u.matches.take(5).forEach { inv ->
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -751,7 +755,7 @@ fun <T> SearchPickerDialog(
                 OutlinedTextField(
                     value = query,
                     onValueChange = { query = it; if (serverSearch) onQuery(it) },
-                    label = { Text("Cari") },
+                    label = { Text(stringResource(R.string.cari)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -761,16 +765,16 @@ fun <T> SearchPickerDialog(
                         Load.Loading -> CircularProgressIndicator(Modifier.align(Alignment.Center))
                         is Load.Error -> Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(state.message, color = MaterialTheme.colorScheme.error)
-                            TextButton(onClick = onRetry) { Text("Coba lagi") }
+                            TextButton(onClick = onRetry) { Text(stringResource(R.string.coba_lagi)) }
                         }
                         is Load.Content -> {
                             val shown = if (serverSearch || query.isBlank()) state.data else state.data.filter { matches(it, query.trim()) }
                             if (shown.isEmpty()) {
-                                Text("Tidak ada hasil.", Modifier.align(Alignment.Center))
+                                Text(stringResource(R.string.tidak_ada_hasil), Modifier.align(Alignment.Center))
                             } else {
                                 LazyColumn {
                                     items(shown) { item ->
-                                        Column(Modifier.fillMaxWidth().clickable { onPick(item) }.padding(vertical = 10.dp)) {
+                                        Column(Modifier.fillMaxWidth().clickable(role = Role.Button) { onPick(item) }.padding(vertical = 10.dp)) {
                                             Text(label(item), style = MaterialTheme.typography.bodyLarge)
                                             sub(item)?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                                         }
@@ -784,6 +788,6 @@ fun <T> SearchPickerDialog(
             }
         },
         confirmButton = {},
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Tutup") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.tutup)) } },
     )
 }

@@ -81,8 +81,8 @@
 - Tidak ada filter customer pada rekap di UI; tidak ada ekspor PDF/cetak; hanya "Bagikan" teks.
 - Tidak ada pembuatan invoice langsung Paid/Cancelled (sengaja, sesuai aturan).
 - Draft lokal hanya untuk invoice (satu draft per user+bisnis).
-- Dukungan tema gelap ada, tetapi warna badge status tidak disesuaikan untuk mode gelap.
-- Tidak ada lokalisasi selain Bahasa Indonesia; teks UI ditulis langsung di Compose (bukan strings.xml), kecuali nama app.
+- Hanya Bahasa Indonesia. Sebagian besar teks statis di layar sudah di `res/values/strings.xml`; teks dengan interpolasi (`$var`), pesan galat
+  di ViewModel/repository, label status (`InvoiceStatus.label`), dan teks bagikan (`InvoiceShareText`) masih di kode (lihat bagian visual di bawah).
 - Sertifikat pinning tidak diterapkan.
 
 ## Preview harga (BOQ/RAB review): keputusan dan yang belum dikerjakan
@@ -102,12 +102,37 @@
 - BR-09 (batas atas qty/nominal), BR-11 (penanda preview dari cache), BR-14 (format nilai server >2 desimal), BR-15 (number vs string
   pada body create): tidak diubah; perlu kebijakan/kontrak dari pemilik API. BR-01 lihat di atas.
 
+## Tampilan, tema, dan identitas visual (review social-media-visual)
+
+Dikerjakan: label status Indonesia + konfirmasi Bagikan untuk invoice Draft DAN Dibatalkan (SMV-03/06); sebagian besar teks statis
+Login/Home/Akun/Invoice/Customer/Pengeluaran + dialog/komponen bersama dipindah ke `strings.xml` (SMV-05, bertahap); tema terang/gelap penuh
+(`values-night`, skema M3 lengkap, warna badge/peringatan punya varian gelap; pencocokan warna status masih lewat string literal "Draft"/"Sent"/...) dan dynamic color di Android 12+
+(SMV-02/08/09/18); Splash Screen API (`androidx.core:core-splashscreen:1.2.0`, versi stabil terbaru di Google Maven per 2026-10-27; layar Splash Compose
+tetap ada untuk pemeriksaan sesi); ikon adaptive dengan layer monochrome dan `roundIcon` terpisah (SMV-11); logo bisnis di Home (cadangan: tanda merek
+placeholder) dan tanda merek di Login (SMV-04); tombol utama tinggi minimum 48dp, `Role.Button` pada baris daftar, `contentDescription` null untuk
+logo yang berdampingan dengan nama bisnis (SMV-17/20); spinner tombol Login 20dp (SMV-07); hint/isError pada nominal pengeluaran (SMV-15);
+satu fungsi `shareNow` dan judul chooser "Bagikan invoice" (SMV-16).
+
+Batasan dan keputusan yang membutuhkan pemilik:
+
+- **Aset logo laundry asli dari pemilik DIBUTUHKAN.** Ikon launcher (huruf "B" di atas biru `#0B5FA5`), tanda merek di Login, dan warna seed adalah
+  PLACEHOLDER buatan, bukan merek. Jangan dirilis ke publik. Ganti `drawable/ic_launcher_foreground.xml`, `ic_launcher_monochrome.xml`,
+  `values/colors.xml` (`brand_seed`), dan seed di `ui/theme/Theme.kt` setelah aset tersedia.
+- Logo bisnis dari server tidak tersedia sebelum login (data lokal dihapus saat keluar/sesi berakhir, sesuai aturan 10), jadi Login dan Splash memakai
+  tanda merek, bukan logo bisnis. Home memakai logo bisnis dari cache profil bila ada.
+- Dynamic color diaktifkan (`USE_DYNAMIC_COLOR = true` di `Theme.kt`) karena warna merek belum ada; ubah ke `false` bila ingin warna merek tetap
+  setelah palet asli tersedia. Skema terang/gelap cadangan dipakai di Android < 12.
+- Belum dikerjakan: teks berinterpolasi dan pesan di ViewModel ke `strings.xml`/plurals (perlu penataan format), ikon pembeda pada badge status
+  (SMV-10), pesan galat server yang bahasanya tidak terjamin (SMV-12, butuh kontrak dari API), penyeragaman istilah campuran seperti "Customer"/"Draft"
+  (SMV-13: keputusan istilah ada pada pemilik), token spacing/radius (SMV-19), dan `@Preview` (SMV-20).
+- Belum diuji pada perangkat/emulator: tampilan, splash, dynamic color, dan TalkBack hanya lulus kompilasi dan unit test.
+
 ## Temuan review yang SENGAJA tidak diperbaiki di cabang ini
 
 - Enkripsi Room/logo (PRV-01/T8: SQLCipher), retensi/TTL cache, dan certificate pinning: butuh keputusan kebijakan/rotasi sertifikat.
 - `gradle/verification-metadata.xml` (verifikasi checksum dependency): perlu dibuat dengan `--write-verification-metadata` di jaringan penuh.
 - Idempotency-Key customer/expense tetap di memori (R-06).
 - Pembulatan preview per baris (F2/BR-01), format kirim number-vs-string invoice (F1), batas atas nominal, K-2 (pencatatan pembayaran),
-  K-3/K-4 (profil/rekening basi), role-based UI (A-02), `expires_at` belum ditegakkan di klien (T13), `strings.xml`/tema/ikon (SMV-01/02/05).
+  K-3/K-4 (profil/rekening basi), role-based UI (A-02), `expires_at` belum ditegakkan di klien (T13).
 - Pesan error server ditampilkan apa adanya (A-08/SMV-12).
 - Daftar customer/pengeluaran tidak otomatis menyegarkan saat kembali dari form (Home sudah).

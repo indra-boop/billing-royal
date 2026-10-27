@@ -1,5 +1,8 @@
 package id.jerco.billingroyal.ui.screens
 
+import androidx.compose.ui.Alignment
+import id.jerco.billingroyal.ui.components.minTouch
+import id.jerco.billingroyal.ui.components.BrandMark
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -59,13 +62,21 @@ import kotlinx.coroutines.launch
 
 // ------------------------------------------------------------------ Home
 
-data class HomeData(val businessName: String, val from: LocalDate, val to: LocalDate, val summary: ReportSummaryDto)
+data class HomeData(
+    val businessName: String,
+    val from: LocalDate,
+    val to: LocalDate,
+    val summary: ReportSummaryDto,
+    /** Path logo bisnis di cache lokal; null bila belum ada (tampil tanda merek cadangan). */
+    val logoPath: String? = null,
+)
 
 data class HomeUiState(val load: Load<HomeData> = Load.Loading, val refreshing: Boolean = false)
 
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val reports: ReportRepository,
+    private val auth: AuthRepository,
     private val sessionManager: SessionManager,
 ) : ViewModel() {
     private val _state = MutableStateFlow(HomeUiState())
@@ -96,7 +107,7 @@ class HomeViewModel @Inject constructor(
             val name = sessionManager.session.value?.businessName.orEmpty()
             // Gagal: data lama tetap tampil (tidak diganti layar error).
             (reports.invoices(from, today) as? ApiResult.Success)?.let { r ->
-                _state.value = HomeUiState(Load.Content(HomeData(name, from, today, r.data.summary)))
+                _state.value = HomeUiState(Load.Content(HomeData(name, from, today, r.data.summary, auth.cachedProfile()?.logoPath)))
             }
         }
     }
@@ -109,7 +120,8 @@ class HomeViewModel @Inject constructor(
             val from = today.withDayOfMonth(1)
             val name = sessionManager.session.value?.businessName.orEmpty()
             _state.value = when (val r = reports.invoices(from, today)) {
-                is ApiResult.Success -> HomeUiState(Load.Content(HomeData(name, from, today, r.data.summary)))
+                is ApiResult.Success ->
+                    HomeUiState(Load.Content(HomeData(name, from, today, r.data.summary, auth.cachedProfile()?.logoPath)))
                 is ApiResult.Failure -> HomeUiState(Load.Error(r.error.message))
             }
         }
@@ -143,7 +155,16 @@ fun HomeScreen(
                     Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    Text(data.businessName.ifBlank { "Laundry" }, style = MaterialTheme.typography.headlineSmall)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        // Logo bisnis bila ada; bila tidak (atau gagal didecode) tampil tanda merek placeholder.
+                        LogoImage(
+                            path = data.logoPath,
+                            modifier = Modifier.size(56.dp),
+                            contentDescription = null, // nama bisnis tampil di sebelahnya
+                            fallback = { BrandMark(size = 56.dp) },
+                        )
+                        Text(data.businessName.ifBlank { "Laundry" }, style = MaterialTheme.typography.headlineSmall)
+                    }
                     Card(Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text(
@@ -153,16 +174,16 @@ fun HomeScreen(
                             SummaryRows(data.summary)
                         }
                     }
-                    Button(onClick = onCreateInvoice, modifier = Modifier.fillMaxWidth()) { Text("Buat Invoice") }
+                    Button(onClick = onCreateInvoice, modifier = Modifier.fillMaxWidth().minTouch()) { Text(stringResource(R.string.buat_invoice)) }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = onCustomers, modifier = Modifier.weight(1f)) { Text("Customer") }
-                        Button(onClick = onExpenses, modifier = Modifier.weight(1f)) { Text("Pengeluaran") }
+                        Button(onClick = onCustomers, modifier = Modifier.weight(1f).minTouch()) { Text(stringResource(R.string.customer)) }
+                        Button(onClick = onExpenses, modifier = Modifier.weight(1f).minTouch()) { Text(stringResource(R.string.pengeluaran)) }
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = onInvoices, modifier = Modifier.weight(1f)) { Text("Daftar Invoice") }
-                        OutlinedButton(onClick = onReport, modifier = Modifier.weight(1f)) { Text("Rekap") }
+                        OutlinedButton(onClick = onInvoices, modifier = Modifier.weight(1f).minTouch()) { Text(stringResource(R.string.daftar_invoice)) }
+                        OutlinedButton(onClick = onReport, modifier = Modifier.weight(1f).minTouch()) { Text(stringResource(R.string.rekap)) }
                     }
-                    OutlinedButton(onClick = onAccount, modifier = Modifier.fillMaxWidth()) { Text("Akun") }
+                    OutlinedButton(onClick = onAccount, modifier = Modifier.fillMaxWidth().minTouch()) { Text(stringResource(R.string.akun)) }
                 }
             }
         }
@@ -171,11 +192,11 @@ fun HomeScreen(
 
 @Composable
 fun SummaryRows(summary: ReportSummaryDto) {
-    LabeledValue("Jumlah invoice", summary.invoice_count.toString())
-    LabeledValue("Total qty", MoneyFormatter.formatQty(summary.total_quantity))
-    LabeledValue("Total invoice", MoneyFormatter.format(summary.invoice_total))
-    LabeledValue("Total dibayar", MoneyFormatter.format(summary.paid_total))
-    LabeledValue("Total sisa", MoneyFormatter.format(summary.balance_total))
+    LabeledValue(stringResource(R.string.jumlah_invoice), summary.invoice_count.toString())
+    LabeledValue(stringResource(R.string.total_qty), MoneyFormatter.formatQty(summary.total_quantity))
+    LabeledValue(stringResource(R.string.total_invoice), MoneyFormatter.format(summary.invoice_total))
+    LabeledValue(stringResource(R.string.total_dibayar), MoneyFormatter.format(summary.paid_total))
+    LabeledValue(stringResource(R.string.total_sisa), MoneyFormatter.format(summary.balance_total))
 }
 
 // ------------------------------------------------------------------ Akun
@@ -243,7 +264,7 @@ fun AccountScreen(onBack: () -> Unit, onLoggedOut: () -> Unit, viewModel: Accoun
 
     LaunchedEffect(loggedOut) { if (loggedOut) onLoggedOut() }
 
-    AppScaffold(title = "Akun", onBack = onBack) { padding ->
+    AppScaffold(title = stringResource(R.string.akun), onBack = onBack) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
             LoadStateView(
                 state = load,
@@ -256,14 +277,14 @@ fun AccountScreen(onBack: () -> Unit, onLoggedOut: () -> Unit, viewModel: Accoun
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     data.profile?.logoPath?.let { path -> LogoImage(path, Modifier.size(72.dp)) }
-                    LabeledValue("Nama", data.session.fullName)
-                    LabeledValue("Username", data.session.username)
-                    LabeledValue("Peran", data.session.role)
-                    LabeledValue("Laundry", data.session.businessName)
-                    LabeledValue("Kode laundry", data.session.businessCode)
-                    data.profile?.address?.let { LabeledValue("Alamat", it) }
+                    LabeledValue(stringResource(R.string.nama_2), data.session.fullName)
+                    LabeledValue(stringResource(R.string.username), data.session.username)
+                    LabeledValue(stringResource(R.string.peran), data.session.role)
+                    LabeledValue(stringResource(R.string.laundry), data.session.businessName)
+                    LabeledValue(stringResource(R.string.kode_laundry), data.session.businessCode)
+                    data.profile?.address?.let { LabeledValue(stringResource(R.string.alamat), it) }
                     Spacer(Modifier.height(8.dp))
-                    Button(onClick = { confirm = true }, enabled = !loggingOut, modifier = Modifier.fillMaxWidth()) {
+                    Button(onClick = { confirm = true }, enabled = !loggingOut, modifier = Modifier.fillMaxWidth().minTouch()) {
                         Text(if (loggingOut) "Keluar..." else "Keluar")
                     }
                 }
@@ -272,9 +293,9 @@ fun AccountScreen(onBack: () -> Unit, onLoggedOut: () -> Unit, viewModel: Accoun
     }
     if (confirm) {
         ConfirmDialog(
-            title = "Keluar",
-            message = "Draft invoice yang belum disimpan akan hilang, dan semua data lokal dihapus dari perangkat ini. Lanjut keluar?",
-            confirmText = "Keluar",
+            title = stringResource(R.string.keluar),
+            message = stringResource(R.string.draft_invoice_yang_belum_disimpan),
+            confirmText = stringResource(R.string.keluar),
             onConfirm = { confirm = false; viewModel.logout() },
             onDismiss = { confirm = false },
         )
@@ -283,8 +304,14 @@ fun AccountScreen(onBack: () -> Unit, onLoggedOut: () -> Unit, viewModel: Accoun
 
 /** Menampilkan logo dari file cache (didecode sekali setelah login), di-downsample. */
 @Composable
-fun LogoImage(path: String, modifier: Modifier = Modifier) {
+fun LogoImage(
+    path: String?,
+    modifier: Modifier = Modifier,
+    contentDescription: String? = stringResource(R.string.logo_description),
+    fallback: (@Composable () -> Unit)? = null,
+) {
     val bitmap = remember(path) {
+        if (path == null) return@remember null
         try {
             val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
             android.graphics.BitmapFactory.decodeFile(path, bounds)
@@ -297,6 +324,8 @@ fun LogoImage(path: String, modifier: Modifier = Modifier) {
         }
     }
     if (bitmap != null) {
-        Image(bitmap = bitmap, contentDescription = stringResource(R.string.logo_description), modifier = modifier)
+        Image(bitmap = bitmap, contentDescription = contentDescription, modifier = modifier)
+    } else {
+        fallback?.invoke()
     }
 }

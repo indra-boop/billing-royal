@@ -1,5 +1,10 @@
 package id.jerco.billingroyal.ui.screens
 
+import id.jerco.billingroyal.R
+import androidx.compose.ui.res.stringResource
+import androidx.compose.foundation.layout.size
+import id.jerco.billingroyal.ui.components.minTouch
+import id.jerco.billingroyal.ui.components.BrandMark
 import android.os.Build
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -109,15 +114,18 @@ fun SplashScreen(onHome: () -> Unit, onLogin: () -> Unit, viewModel: SplashViewM
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Text("Billing Royal", style = MaterialTheme.typography.headlineMedium)
+        // Logo bisnis tidak tersedia sebelum login (data lokal dihapus saat keluar/sesi berakhir): tampilkan tanda merek.
+        BrandMark(size = 72.dp)
+        Spacer(Modifier.height(12.dp))
+        Text(stringResource(R.string.app_name), style = MaterialTheme.typography.headlineMedium)
         Spacer(Modifier.height(24.dp))
         when (val s = state) {
             is SplashState.Error -> {
                 Text(s.message, color = MaterialTheme.colorScheme.error)
                 Spacer(Modifier.height(12.dp))
-                Button(onClick = viewModel::check) { Text("Coba lagi") }
+                Button(onClick = viewModel::check) { Text(stringResource(R.string.coba_lagi)) }
                 Spacer(Modifier.height(8.dp))
-                OutlinedButton(onClick = viewModel::forceLogin) { Text("Masuk ulang") }
+                OutlinedButton(onClick = viewModel::forceLogin) { Text(stringResource(R.string.masuk_ulang)) }
             }
             else -> CircularProgressIndicator()
         }
@@ -180,8 +188,8 @@ fun LoginScreen(onLoggedIn: () -> Unit, viewModel: LoginViewModel = hiltViewMode
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("Billing Royal", style = MaterialTheme.typography.headlineMedium)
-        Text("Masuk sebagai operator", style = MaterialTheme.typography.bodyMedium)
+        Text(stringResource(R.string.app_name), style = MaterialTheme.typography.headlineMedium)
+        Text(stringResource(R.string.masuk_sebagai_operator), style = MaterialTheme.typography.bodyMedium)
         notice?.let {
             Spacer(Modifier.height(16.dp))
             InfoBanner(sessionNoticeText(it))
@@ -190,7 +198,7 @@ fun LoginScreen(onLoggedIn: () -> Unit, viewModel: LoginViewModel = hiltViewMode
         OutlinedTextField(
             value = username,
             onValueChange = { username = it },
-            label = { Text("Username") },
+            label = { Text(stringResource(R.string.username)) },
             singleLine = true,
             enabled = !state.loading,
             modifier = Modifier.fillMaxWidth(),
@@ -199,7 +207,7 @@ fun LoginScreen(onLoggedIn: () -> Unit, viewModel: LoginViewModel = hiltViewMode
         OutlinedTextField(
             value = password,
             onValueChange = { password = it },
-            label = { Text("Password") },
+            label = { Text(stringResource(R.string.password)) },
             singleLine = true,
             enabled = !state.loading,
             visualTransformation = PasswordVisualTransformation(),
@@ -214,9 +222,9 @@ fun LoginScreen(onLoggedIn: () -> Unit, viewModel: LoginViewModel = hiltViewMode
         Button(
             onClick = { viewModel.login(username, password) },
             enabled = !state.loading,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().minTouch(),
         ) {
-            if (state.loading) CircularProgressIndicator(modifier = Modifier.height(18.dp), strokeWidth = 2.dp) else Text("Masuk")
+            if (state.loading) CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp) else Text(stringResource(R.string.masuk))
         }
     }
 }

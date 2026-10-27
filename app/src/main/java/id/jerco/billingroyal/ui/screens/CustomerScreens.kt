@@ -1,5 +1,9 @@
 package id.jerco.billingroyal.ui.screens
 
+import androidx.compose.ui.semantics.Role
+import id.jerco.billingroyal.ui.components.minTouch
+import id.jerco.billingroyal.R
+import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -124,21 +128,21 @@ fun CustomerListScreen(
     LaunchedEffect(nearEnd, state.items.size) { if (nearEnd) viewModel.loadMore() }
 
     AppScaffold(
-        title = "Customer",
+        title = stringResource(R.string.customer),
         onBack = onBack,
         floatingActionButton = {
-            FloatingActionButton(onClick = onAdd) { Icon(Icons.Default.Add, contentDescription = "Tambah customer") }
+            FloatingActionButton(onClick = onAdd) { Icon(Icons.Default.Add, contentDescription = stringResource(R.string.tambah_customer)) }
         },
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
             OutlinedTextField(
                 value = query,
                 onValueChange = viewModel::setQuery,
-                label = { Text("Cari nama atau telepon") },
+                label = { Text(stringResource(R.string.cari_nama_atau_telepon)) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             )
-            if (state.fromCache) InfoBanner("Tidak ada koneksi. Menampilkan data tersimpan.")
+            if (state.fromCache) InfoBanner(stringResource(R.string.tidak_ada_koneksi_menampilkan_data))
             LoadStateView(
                 state = state.toLoad(),
                 refreshing = state.refreshing,
@@ -149,7 +153,7 @@ fun CustomerListScreen(
             ) { items ->
                 LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
                     items(items, key = { it.id }) { c ->
-                        Column(Modifier.fillMaxWidth().clickable { onOpen(c.id) }.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                        Column(Modifier.fillMaxWidth().clickable(role = Role.Button) { onOpen(c.id) }.padding(horizontal = 16.dp, vertical = 12.dp)) {
                             Text(c.name, style = MaterialTheme.typography.titleMedium)
                             val sub = listOfNotNull(c.phone?.takeIf { it.isNotBlank() }, c.price_list_name?.takeIf { it.isNotBlank() })
                             if (sub.isNotEmpty()) Text(sub.joinToString("  |  "), style = MaterialTheme.typography.bodySmall)
@@ -163,7 +167,7 @@ fun CustomerListScreen(
                         item {
                             Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                                 Text(msg, color = MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f))
-                                TextButton(onClick = viewModel::loadMore) { Text("Coba lagi") }
+                                TextButton(onClick = viewModel::loadMore) { Text(stringResource(R.string.coba_lagi)) }
                             }
                         }
                     }
@@ -232,7 +236,7 @@ fun CustomerDetailScreen(onBack: () -> Unit, onEdit: (Long) -> Unit, viewModel: 
     var confirmDelete by remember { mutableStateOf(false) }
     LaunchedEffect(state.deleted) { if (state.deleted) onBack() }
 
-    AppScaffold(title = "Detail Customer", onBack = onBack) { padding ->
+    AppScaffold(title = stringResource(R.string.detail_customer), onBack = onBack) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
             LoadStateView(
                 state = state.load,
@@ -245,17 +249,17 @@ fun CustomerDetailScreen(onBack: () -> Unit, onEdit: (Long) -> Unit, viewModel: 
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Text(c.name, style = MaterialTheme.typography.headlineSmall)
-                    LabeledValue("Email", c.email.orEmpty())
-                    LabeledValue("Telepon", c.phone.orEmpty())
-                    LabeledValue("Alamat", c.address.orEmpty())
-                    LabeledValue("Price list", c.price_list_name.orEmpty())
+                    LabeledValue(stringResource(R.string.email), c.email.orEmpty())
+                    LabeledValue(stringResource(R.string.telepon), c.phone.orEmpty())
+                    LabeledValue(stringResource(R.string.alamat), c.address.orEmpty())
+                    LabeledValue(stringResource(R.string.price_list), c.price_list_name.orEmpty())
                     state.deleteError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                    OutlinedButton(onClick = { onEdit(c.id) }, modifier = Modifier.fillMaxWidth()) { Text("Ubah") }
+                    OutlinedButton(onClick = { onEdit(c.id) }, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.ubah)) }
                     if (viewModel.flags.delete) {
                         OutlinedButton(
                             onClick = { confirmDelete = true },
                             enabled = !state.deleting,
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.fillMaxWidth().minTouch(),
                         ) { Text(if (state.deleting) "Menghapus..." else "Hapus") }
                     }
                 }
@@ -264,9 +268,9 @@ fun CustomerDetailScreen(onBack: () -> Unit, onEdit: (Long) -> Unit, viewModel: 
     }
     if (confirmDelete) {
         ConfirmDialog(
-            title = "Hapus customer",
-            message = "Customer ini akan dihapus. Customer yang sudah punya invoice tidak dapat dihapus.",
-            confirmText = "Hapus",
+            title = stringResource(R.string.hapus_customer),
+            message = stringResource(R.string.customer_ini_akan_dihapus_customer),
+            confirmText = stringResource(R.string.hapus),
             onConfirm = { confirmDelete = false; viewModel.delete() },
             onDismiss = { confirmDelete = false },
         )
@@ -418,7 +422,7 @@ fun CustomerFormScreen(onBack: () -> Unit, onCheckList: () -> Unit, viewModel: C
                 ) {
                     Text(s.loadError!!, color = MaterialTheme.colorScheme.error)
                     Spacer(Modifier.height(12.dp))
-                    androidx.compose.material3.Button(onClick = { viewModel.loadExisting() }) { Text("Coba lagi") }
+                    androidx.compose.material3.Button(onClick = { viewModel.loadExisting() }) { Text(stringResource(R.string.coba_lagi)) }
                 }
                 else -> Column(
                     Modifier.fillMaxSize().imePadding().verticalScroll(rememberScrollState()).padding(16.dp),
@@ -426,24 +430,24 @@ fun CustomerFormScreen(onBack: () -> Unit, onCheckList: () -> Unit, viewModel: C
                 ) {
                     OutlinedTextField(
                         value = s.name, onValueChange = { v -> viewModel.update { copy(name = v, nameError = null) } },
-                        label = { Text("Nama *") }, singleLine = true, isError = s.nameError != null,
+                        label = { Text(stringResource(R.string.nama)) }, singleLine = true, isError = s.nameError != null,
                         supportingText = { s.nameError?.let { Text(it) } }, modifier = Modifier.fillMaxWidth(),
                     )
                     OutlinedTextField(
                         value = s.email, onValueChange = { v -> viewModel.update { copy(email = v, emailError = null) } },
-                        label = { Text("Email") }, singleLine = true, isError = s.emailError != null,
+                        label = { Text(stringResource(R.string.email)) }, singleLine = true, isError = s.emailError != null,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
                         supportingText = { s.emailError?.let { Text(it) } }, modifier = Modifier.fillMaxWidth(),
                     )
                     OutlinedTextField(
                         value = s.phone, onValueChange = { v -> viewModel.update { copy(phone = v, phoneError = null) } },
-                        label = { Text("Telepon") }, singleLine = true, isError = s.phoneError != null,
+                        label = { Text(stringResource(R.string.telepon)) }, singleLine = true, isError = s.phoneError != null,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                         supportingText = { s.phoneError?.let { Text(it) } }, modifier = Modifier.fillMaxWidth(),
                     )
                     OutlinedTextField(
                         value = s.address, onValueChange = { v -> viewModel.update { copy(address = v, addressError = null) } },
-                        label = { Text("Alamat") }, isError = s.addressError != null, minLines = 2,
+                        label = { Text(stringResource(R.string.alamat)) }, isError = s.addressError != null, minLines = 2,
                         supportingText = { s.addressError?.let { Text(it) } }, modifier = Modifier.fillMaxWidth(),
                     )
                     PriceListPicker(
@@ -452,7 +456,7 @@ fun CustomerFormScreen(onBack: () -> Unit, onCheckList: () -> Unit, viewModel: C
                         onSelect = { id -> viewModel.update { copy(priceListId = id) } },
                     )
                     s.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                    SavingButton("Simpan", saving = s.saving, onClick = viewModel::save)
+                    SavingButton(stringResource(R.string.simpan), saving = s.saving, onClick = viewModel::save)
                 }
             }
         }
@@ -460,7 +464,7 @@ fun CustomerFormScreen(onBack: () -> Unit, onCheckList: () -> Unit, viewModel: C
 
     if (s.uncertain) {
         UncertainDialog(
-            message = "Koneksi terputus atau waktu habis setelah data dikirim. Customer mungkin sudah tersimpan. " +
+            message = stringResource(R.string.koneksi_terputus_atau_waktu_habis) +
                 "Periksa daftar customer terlebih dahulu sebelum mengirim ulang.",
             onCheck = { viewModel.dismissUncertain(); onCheckList() },
             onResend = { viewModel.dismissUncertain(); viewModel.save() }, // sudah lewat konfirmasi kedua di dialog
@@ -478,12 +482,12 @@ private fun PriceListPicker(lists: List<PriceListSummaryDto>, selectedId: Long?,
             value = label,
             onValueChange = {},
             readOnly = true,
-            label = { Text("Price list") },
+            label = { Text(stringResource(R.string.price_list)) },
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
             modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            DropdownMenuItem(text = { Text("Tanpa price list") }, onClick = { onSelect(null); expanded = false })
+            DropdownMenuItem(text = { Text(stringResource(R.string.tanpa_price_list)) }, onClick = { onSelect(null); expanded = false })
             lists.forEach { pl ->
                 DropdownMenuItem(text = { Text(pl.name) }, onClick = { onSelect(pl.id); expanded = false })
             }
