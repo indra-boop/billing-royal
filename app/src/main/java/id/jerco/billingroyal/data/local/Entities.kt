@@ -80,4 +80,26 @@ data class InvoiceDraftEntity(
     /** Hash payload yang terkait dengan [idempotencyKey]; bila payload berubah, key baru dibuat. */
     val payloadHash: String?,
     val updatedAt: Long,
+    /**
+     * Epoch millis saat percobaan kirim dimulai dan hasilnya belum pasti (timeout/putus/proses mati).
+     * Selama tidak null, dialog "Status penyimpanan belum pasti" muncul lagi walau proses sempat mati.
+     * Dihapus hanya saat invoice berhasil dibuat atau draft dikosongkan/ditolak server (percobaan pertama).
+     */
+    val uncertainSince: Long? = null,
+)
+
+/**
+ * Idempotency-Key aksi create (customer/expense) yang SEDANG berjalan atau hasilnya belum pasti (T10).
+ * Satu baris per (scope, kind). Ada di Room sehingga ikut terhapus oleh clearAllTables() saat logout/401/403,
+ * dan terpisah per user+bisnis lewat [scope]. [payloadHash] = SHA-256 dari JSON kanonik body request.
+ */
+@Entity(tableName = "pending_idempotency", primaryKeys = ["scope", "kind"])
+data class PendingIdempotencyEntity(
+    val scope: String,
+    /** "customer_create" atau "expense_create". */
+    val kind: String,
+    val idempotencyKey: String,
+    val payloadHash: String,
+    /** Epoch millis saat key dibuat; key yang lebih tua dari TTL tidak dipakai ulang. */
+    val createdAt: Long,
 )

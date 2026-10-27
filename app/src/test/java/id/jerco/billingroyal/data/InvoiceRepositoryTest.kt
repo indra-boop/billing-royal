@@ -7,6 +7,7 @@ import id.jerco.billingroyal.data.remote.ApiResult
 import id.jerco.billingroyal.data.remote.AppError
 import id.jerco.billingroyal.data.remote.AuthInterceptor
 import id.jerco.billingroyal.data.remote.BillingApi
+import id.jerco.billingroyal.data.remote.ErrorMapper
 import id.jerco.billingroyal.data.remote.NetworkFactory
 import id.jerco.billingroyal.data.remote.SessionInterceptor
 import id.jerco.billingroyal.data.remote.isOutcomeUncertain
@@ -50,7 +51,11 @@ private class FakeDraftDao : DraftDao {
 class InvoiceRepositoryTest {
     private lateinit var server: MockWebServer
     private lateinit var dao: FakeDraftDao
-    private val scope = object : ScopeProvider { override val scopeKey = "5:9" }
+    private class FakeScope : ScopeProvider {
+        override val scopeKey = "5:9"
+        override var generation = 0L
+    }
+    private val scope = FakeScope()
     private val uuidV4 = Regex("^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
 
     @BeforeTest
@@ -65,12 +70,14 @@ class InvoiceRepositoryTest {
         server.shutdown()
     }
 
+    /**
+     * Klien dibuat lewat NetworkFactory PRODUKSI (retryOnConnectionFailure=false, tanpa redirect, urutan interceptor
+     * sama dengan DI); hanya timeout yang dipersingkat agar test cepat.
+     */
     private fun client(readTimeoutMs: Long = 5_000, vararg extra: okhttp3.Interceptor): OkHttpClient =
-        OkHttpClient.Builder()
+        NetworkFactory.okHttpClient(extra.toList()).newBuilder()
             .readTimeout(readTimeoutMs, TimeUnit.MILLISECONDS)
             .connectTimeout(5, TimeUnit.SECONDS)
-            .retryOnConnectionFailure(false)
-            .apply { extra.forEach(::addInterceptor) }
             .build()
 
     private fun repo(flags: FeatureFlags = FeatureFlags(), client: OkHttpClient = client()): InvoiceRepository {
@@ -225,6 +232,22 @@ class InvoiceRepositoryTest {
     }
 
     @Test
+    fun `item service yang sama dua kali ditolak sebelum request`() = runBlocking<Unit> {
+        val dup = draft(DraftItem(1, "Cuci", "kg", "1"), DraftItem(1, "Cuci", "kg", "2"))
+        val r = repo().submit(dup)
+        assertTrue(assertIs<ApiResult.Failure>(r).error.message.contains("sama"))
+        assertEquals(0, server.requestCount)
+    }
+
+    @Test
+    fun `tepat 200 item diterima dan dikirim`() = runBlocking<Unit> {
+        server.enqueue(created())
+        val items = List(200) { DraftItem(it.toLong() + 1, "x", "kg", "1") }
+        assertIs<ApiResult.Success<*>>(repo().submit(draft(*items.toTypedArray())))
+        assertEquals(200, bodyOf(server.takeRequest())["items"]!!.jsonArray.size)
+    }
+
+    @Test
     fun `list invoice mengirim filter dan membaca meta paginasi`() = runBlocking<Unit> {
         server.enqueue(
             MockResponse().setHeader("Content-Type", "application/json").setBody(
@@ -287,7 +310,7 @@ class InvoiceRepositoryTest {
         var invalidated = 0
         val api = NetworkFactory.api(
             server.url("/billing/api/v1/").toString(),
-            client(5_000, SessionInterceptor { invalidated++ }),
+            client(5_000, AuthInterceptor { "tok-1" }, SessionInterceptor { _, _, _ -> invalidated++ }),
         )
         fun error(status: Int, code: String) = MockResponse().setResponseCode(status).setHeader("Content-Type", "application/json")
             .setBody("""{"error":{"code":"$code","message":"m","details":{}}}""")
@@ -310,5 +333,115 @@ class InvoiceRepositoryTest {
         server.enqueue(error(401, "invalid_credentials"))
         runCatching { api.login(id.jerco.billingroyal.data.remote.LoginRequest("u", "p", "d")) }
         assertEquals(2, invalidated)
+    }
+}
+
+/** Penanda "hasil belum pasti" pada draft + penjagaan sesi (review R-02/R-03, BR-SEC-02, PRV-05). */
+class InvoiceUncertainMarkerTest {
+    private lateinit var server: MockWebServer
+    private val dao = FakeDraftDao()
+    private class FakeScope : ScopeProvider {
+        override val scopeKey = "5:9"
+        override var generation = 0L
+    }
+    private val scope = FakeScope()
+
+    @BeforeTest fun setUp() { server = MockWebServer().also { it.start() } }
+    @AfterTest fun tearDown() { server.shutdown() }
+
+    private fun repo(): InvoiceRepository {
+        val client = NetworkFactory.okHttpClient(emptyList()).newBuilder().readTimeout(300, TimeUnit.MILLISECONDS).build()
+        return InvoiceRepository(NetworkFactory.api(server.url("/billing/api/v1/").toString(), client), dao, scope, FeatureFlags())
+    }
+
+    private fun draft() = InvoiceDraft(
+        customerId = 42, customerName = "Customer Fiktif", priceListId = 3, invoiceDate = LocalDate.of(2026, 10, 27),
+        notes = "", items = listOf(DraftItem(1, "Cuci kiloan", "kg", "2")),
+    )
+
+    private val ok = """{"data":{"id":7,"invoice_number":"INV-7","invoice_date":"2026-10-27","customer_id":42,"customer_name":"A","status":"Draft","subtotal":1000,"paid_amount":0,"balance":1000}}"""
+
+    @Test
+    fun `hasil tidak pasti meninggalkan penanda di Room dan autosave tidak menimpanya`() = runBlocking<Unit> {
+        server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
+        val repository = repo()
+        assertIs<ApiResult.Failure>(repository.submit(draft()))
+        val marker = dao.rows[scope.scopeKey]?.uncertainSince
+        assertNotNull(marker, "penanda harus tersimpan agar dialog muncul lagi setelah proses mati")
+
+        // Autosave (pengguna mengetik) tidak boleh menghapus penanda.
+        repository.saveDraft(repository.loadDraft()!!.copy(notes = "ubah catatan"))
+        assertEquals(marker, dao.rows[scope.scopeKey]?.uncertainSince)
+        assertEquals(marker, repository.loadDraft()!!.uncertainSince)
+    }
+
+    @Test
+    fun `penanda ditulis SEBELUM request (proses mati di tengah request tetap terdeteksi)`() = runBlocking<Unit> {
+        server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
+        var markerDuringRequest: Long? = null
+        val spyDao = object : DraftDao by dao {
+            override suspend fun upsert(draft: InvoiceDraftEntity) { dao.upsert(draft); markerDuringRequest = draft.uncertainSince }
+        }
+        val client = NetworkFactory.okHttpClient(emptyList()).newBuilder().readTimeout(200, TimeUnit.MILLISECONDS).build()
+        InvoiceRepository(NetworkFactory.api(server.url("/billing/api/v1/").toString(), client), spyDao, scope, FeatureFlags())
+            .submit(draft())
+        assertNotNull(markerDuringRequest)
+    }
+
+    @Test
+    fun `sukses menghapus draft sehingga tidak muncul lagi`() = runBlocking<Unit> {
+        server.enqueue(MockResponse().setResponseCode(201).setHeader("Content-Type", "application/json").setBody(ok))
+        val repository = repo()
+        assertIs<ApiResult.Success<*>>(repository.submit(draft()))
+        assertNull(repository.loadDraft())
+    }
+
+    @Test
+    fun `gagal pasti pada percobaan pertama menghapus penanda tetapi key tetap`() = runBlocking<Unit> {
+        server.enqueue(
+            MockResponse().setResponseCode(422).setHeader("Content-Type", "application/json")
+                .setBody("""{"error":{"code":"validation_error","message":"Tidak valid.","details":{"items.0.qty":"Qty salah."}}}"""),
+        )
+        val repository = repo()
+        assertIs<ApiResult.Failure>(repository.submit(draft()))
+        assertNull(dao.rows[scope.scopeKey]?.uncertainSince)
+        assertNotNull(dao.rows[scope.scopeKey]?.idempotencyKey)
+    }
+
+    @Test
+    fun `penanda lama dipertahankan walau percobaan berikutnya gagal pasti`() = runBlocking<Unit> {
+        server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
+        server.enqueue(MockResponse().setResponseCode(422).setHeader("Content-Type", "application/json")
+            .setBody("""{"error":{"code":"validation_error","message":"Tidak valid."}}"""))
+        val repository = repo()
+        repository.submit(draft())
+        val first = dao.rows[scope.scopeKey]!!.uncertainSince
+        assertIs<ApiResult.Failure>(repository.submit(repository.loadDraft()!!))
+        assertEquals(first, dao.rows[scope.scopeKey]?.uncertainSince, "percobaan pertama mungkin sudah membuat invoice")
+    }
+
+    @Test
+    fun `tidak ada koneksi (notSent) bukan hasil tidak pasti`() {
+        val e = ErrorMapper.map(java.net.UnknownHostException("host"))
+        assertFalse(e.isOutcomeUncertain)
+        assertFalse(ErrorMapper.map(java.net.ConnectException("refused")).isOutcomeUncertain)
+        assertTrue(ErrorMapper.map(java.io.IOException("putus")).isOutcomeUncertain)
+    }
+
+    @Test
+    fun `sesi berakhir selama request mencegah penulisan Room`() = runBlocking<Unit> {
+        server.enqueue(MockResponse().setResponseCode(201).setHeader("Content-Type", "application/json").setBody(ok))
+        // Simulasikan wipe tepat saat request berjalan: generasi naik setelah tiket diambil.
+        val bumping = object : okhttp3.Interceptor {
+            override fun intercept(chain: okhttp3.Interceptor.Chain): okhttp3.Response {
+                scope.generation++
+                return chain.proceed(chain.request())
+            }
+        }
+        val client = NetworkFactory.okHttpClient(listOf(bumping))
+        val r = InvoiceRepository(NetworkFactory.api(server.url("/billing/api/v1/").toString(), client), dao, scope, FeatureFlags())
+        assertIs<ApiResult.Success<*>>(r.submit(draft()))
+        // Draft dibiarkan apa adanya (bukan dihapus/ditulis ulang oleh request milik sesi lama)
+        assertNotNull(dao.rows[scope.scopeKey])
     }
 }

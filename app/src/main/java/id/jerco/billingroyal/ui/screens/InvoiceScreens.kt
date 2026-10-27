@@ -1,5 +1,21 @@
 package id.jerco.billingroyal.ui.screens
 
+import id.jerco.billingroyal.ui.components.RefreshOnResume
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.AlertDialog
+import androidx.compose.ui.semantics.Role
+import id.jerco.billingroyal.R
+import androidx.compose.ui.res.stringResource
+import id.jerco.billingroyal.ui.components.minTouch
 import android.content.Intent
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -68,6 +84,7 @@ import id.jerco.billingroyal.ui.components.LabeledValue
 import id.jerco.billingroyal.ui.components.Load
 import id.jerco.billingroyal.ui.components.LoadStateView
 import id.jerco.billingroyal.ui.components.Pager
+import id.jerco.billingroyal.ui.components.SecureScreen
 import id.jerco.billingroyal.ui.components.StatusBadge
 import java.time.YearMonth
 import javax.inject.Inject
@@ -94,7 +111,7 @@ class InvoiceListViewModel @Inject constructor(private val repo: InvoiceReposito
     val status: StateFlow<String?> = _status
     val query: StateFlow<String> = _query
 
-    private val pager = Pager(viewModelScope) { page ->
+    private val pager = Pager(viewModelScope, key = { it.id }) { page ->
         repo.list(_query.value, _month.value, null, _status.value, page)
     }
     val state = pager.state
@@ -134,28 +151,33 @@ fun InvoiceListScreen(
         }
     }
     LaunchedEffect(nearEnd, state.items.size) { if (nearEnd) viewModel.loadMore() }
+    RefreshOnResume { viewModel.refresh() }
 
     AppScaffold(
-        title = "Daftar Invoice",
+        title = stringResource(R.string.daftar_invoice),
         onBack = onBack,
-        floatingActionButton = { FloatingActionButton(onClick = onCreate) { Icon(Icons.Default.Add, contentDescription = "Buat invoice") } },
+        floatingActionButton = { FloatingActionButton(onClick = onCreate) { Icon(Icons.Default.Add, contentDescription = stringResource(R.string.buat_invoice_2)) } },
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
             MonthSwitcher(month = month, onShift = viewModel::shiftMonth)
             OutlinedTextField(
                 value = query,
                 onValueChange = viewModel::setQuery,
-                label = { Text("Cari nomor invoice atau customer") },
+                label = { Text(stringResource(R.string.cari_nomor_invoice_atau_customer)) },
                 singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                trailingIcon = {
+                    if (query.isNotEmpty()) TextButton(onClick = { viewModel.setQuery("") }) { Text(stringResource(R.string.hapus_teks)) }
+                },
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
             )
             Row(
                 Modifier.fillMaxWidth().horizontalScrollCompat().padding(horizontal = 12.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                FilterChip(selected = status == null, onClick = { viewModel.setStatus(null) }, label = { Text("Semua") })
+                FilterChip(selected = status == null, onClick = { viewModel.setStatus(null) }, label = { Text(stringResource(R.string.semua)) })
                 InvoiceStatus.ALL.forEach { s ->
-                    FilterChip(selected = status == s, onClick = { viewModel.setStatus(s) }, label = { Text(s) })
+                    FilterChip(selected = status == s, onClick = { viewModel.setStatus(s) }, label = { Text(InvoiceStatus.label(s)) })
                 }
             }
             LoadStateView(
@@ -164,9 +186,12 @@ fun InvoiceListScreen(
                 onRefresh = viewModel::refresh,
                 onRetry = viewModel::retry,
                 isEmpty = { it.isEmpty() },
-                emptyMessage = "Tidak ada invoice pada filter ini.",
+                fromCache = state.fromCache,
+                emptyMessage = if (query.isBlank() && status == null) stringResource(R.string.belum_ada_invoice_bulan_ini) else stringResource(R.string.tidak_ada_invoice_pada_filter),
+                emptyAction = if (query.isBlank() && status == null) ({ Button(onClick = onCreate, modifier = Modifier.minTouch()) { Text(stringResource(R.string.buat_invoice_2)) } }) else null,
             ) { items ->
-                LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
+                // Ruang bawah agar baris terakhir tidak tertutup FAB.
+                LazyColumn(state = listState, contentPadding = PaddingValues(bottom = 88.dp), modifier = Modifier.fillMaxSize()) {
                     items(items, key = { it.id }) { inv ->
                         InvoiceRow(inv, onClick = { onOpen(inv.id) })
                         HorizontalDivider()
@@ -178,7 +203,7 @@ fun InvoiceListScreen(
                         item {
                             Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                                 Text(msg, color = MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f))
-                                TextButton(onClick = viewModel::loadMore) { Text("Coba lagi") }
+                                TextButton(onClick = viewModel::loadMore) { Text(stringResource(R.string.coba_lagi)) }
                             }
                         }
                     }
@@ -195,25 +220,25 @@ private fun Modifier.horizontalScrollCompat(): Modifier =
 @Composable
 fun MonthSwitcher(month: YearMonth, onShift: (Long) -> Unit) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        IconButton(onClick = { onShift(-1) }) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "Bulan sebelumnya") }
+        IconButton(onClick = { onShift(-1) }) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = stringResource(R.string.bulan_sebelumnya)) }
         Text(AppDates.displayMonth(month), modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-        IconButton(onClick = { onShift(1) }) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Bulan berikutnya") }
+        IconButton(onClick = { onShift(1) }) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = stringResource(R.string.bulan_berikutnya)) }
     }
 }
 
 @Composable
 fun InvoiceRow(inv: InvoiceDto, onClick: () -> Unit) {
-    Column(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 12.dp)) {
+    Column(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(role = Role.Button, onClick = onClick).padding(horizontal = 16.dp, vertical = 12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(inv.invoice_number, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
             StatusBadge(inv.status)
         }
-        Text(inv.customer_name, style = MaterialTheme.typography.bodyMedium)
+        Text(inv.customer_name, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(AppDates.parseApiDate(inv.invoice_date)?.let { AppDates.display(it) } ?: inv.invoice_date, style = MaterialTheme.typography.bodySmall)
             Text(MoneyFormatter.format(inv.subtotal), style = MaterialTheme.typography.bodyMedium)
         }
-        if (inv.balance.signum() > 0) Text("Sisa " + MoneyFormatter.format(inv.balance), style = MaterialTheme.typography.bodySmall)
+        if (inv.balance.signum() > 0) Text(stringResource(R.string.sisa, MoneyFormatter.format(inv.balance)), style = MaterialTheme.typography.bodySmall)
     }
 }
 
@@ -282,21 +307,29 @@ fun InvoiceDetailScreen(onBack: () -> Unit, viewModel: InvoiceDetailViewModel = 
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val content = (state.load as? Load.Content)?.data
+    SecureScreen()
+    var shareRequest by remember { mutableStateOf<InvoiceDetailData?>(null) }
+
+    fun shareNow(data: InvoiceDetailData, includeBank: Boolean) {
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, "Invoice ${data.invoice.invoice_number}")
+            putExtra(Intent.EXTRA_TEXT, InvoiceShareText.build(data.invoice, data.profile, includeBank))
+        }
+        context.startActivity(Intent.createChooser(send, "Bagikan invoice"))
+    }
+    // Bagikan selalu lewat dialog konfirmasi (data customer keluar dari aplikasi): peringatan untuk Draft/Dibatalkan dan
+    // pilihan "sertakan rekening pembayaran" bila profil punya rekening.
+    fun requestShare(data: InvoiceDetailData) {
+        shareRequest = data
+    }
 
     AppScaffold(
-        title = "Detail Invoice",
+        title = stringResource(R.string.detail_invoice),
         onBack = onBack,
         actions = {
             if (content != null) {
-                IconButton(onClick = {
-                    val text = InvoiceShareText.build(content.invoice, content.profile)
-                    val send = Intent(Intent.ACTION_SEND).apply {
-                        type = "text/plain"
-                        putExtra(Intent.EXTRA_SUBJECT, "Invoice ${content.invoice.invoice_number}")
-                        putExtra(Intent.EXTRA_TEXT, text)
-                    }
-                    context.startActivity(Intent.createChooser(send, "Bagikan"))
-                }) { Icon(Icons.Default.Share, contentDescription = "Bagikan") }
+                IconButton(onClick = { requestShare(content) }) { Icon(Icons.Default.Share, contentDescription = stringResource(R.string.bagikan)) }
             }
         },
     ) { padding ->
@@ -307,23 +340,24 @@ fun InvoiceDetailScreen(onBack: () -> Unit, viewModel: InvoiceDetailViewModel = 
                 onRefresh = { viewModel.load(pull = true) },
                 onRetry = { viewModel.load(pull = false) },
             ) { data ->
-                InvoiceDetailContent(data, state, viewModel, onShare = {
-                    val send = Intent(Intent.ACTION_SEND).apply {
-                        type = "text/plain"
-                        putExtra(Intent.EXTRA_SUBJECT, "Invoice ${data.invoice.invoice_number}")
-                        putExtra(Intent.EXTRA_TEXT, InvoiceShareText.build(data.invoice, data.profile))
-                    }
-                    context.startActivity(Intent.createChooser(send, "Bagikan"))
-                })
+                InvoiceDetailContent(data, state, viewModel, onShare = { requestShare(data) })
             }
         }
     }
 
+    shareRequest?.let { data ->
+        ShareInvoiceDialog(
+            data = data,
+            onShare = { includeBank -> shareRequest = null; shareNow(data, includeBank) },
+            onDismiss = { shareRequest = null },
+        )
+    }
+
     state.pendingStatus?.let { target ->
         ConfirmDialog(
-            title = "Ubah status",
-            message = "Ubah status invoice ke \"$target\"? Tindakan ini dikirim ke server.",
-            confirmText = "Ya, ubah",
+            title = stringResource(R.string.ubah_status),
+            message = "Ubah status invoice ke \"${InvoiceStatus.label(target)}\"? Tindakan ini dikirim ke server.",
+            confirmText = stringResource(R.string.ya_ubah),
             onConfirm = viewModel::confirmStatus,
             onDismiss = viewModel::cancelAsk,
         )
@@ -345,7 +379,7 @@ private fun InvoiceDetailContent(
     ) {
         if (p != null) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                p.logoPath?.let { LogoImage(it, Modifier.size(56.dp)) }
+                p.logoPath?.let { LogoImage(it, Modifier.size(56.dp), contentDescription = null) } // nama bisnis tampil di sebelahnya
                 Column {
                     Text(p.name, style = MaterialTheme.typography.titleMedium)
                     p.address?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
@@ -363,11 +397,11 @@ private fun InvoiceDetailContent(
             Text(inv.invoice_number, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
             StatusBadge(inv.status)
         }
-        LabeledValue("Customer", inv.customer_name)
-        LabeledValue("Tanggal", AppDates.parseApiDate(inv.invoice_date)?.let { AppDates.display(it) } ?: inv.invoice_date)
-        inv.notes?.takeIf { it.isNotBlank() }?.let { LabeledValue("Catatan", it) }
+        LabeledValue(stringResource(R.string.customer), inv.customer_name)
+        LabeledValue(stringResource(R.string.tanggal), AppDates.parseApiDate(inv.invoice_date)?.let { AppDates.display(it) } ?: inv.invoice_date)
+        inv.notes?.takeIf { it.isNotBlank() }?.let { LabeledValue(stringResource(R.string.catatan), it) }
         HorizontalDivider()
-        Text("Item", style = MaterialTheme.typography.titleMedium)
+        Text(stringResource(R.string.item), style = MaterialTheme.typography.titleMedium)
         inv.items.forEach { item ->
             Column {
                 Text(item.description, style = MaterialTheme.typography.bodyLarge)
@@ -381,24 +415,64 @@ private fun InvoiceDetailContent(
             }
         }
         HorizontalDivider()
-        LabeledValue("Subtotal", MoneyFormatter.format(inv.subtotal))
-        LabeledValue("Dibayar", MoneyFormatter.format(inv.paid_amount))
-        LabeledValue("Sisa", MoneyFormatter.format(inv.balance))
+        LabeledValue(stringResource(R.string.subtotal), MoneyFormatter.format(inv.subtotal))
+        LabeledValue(stringResource(R.string.dibayar), MoneyFormatter.format(inv.paid_amount))
+        LabeledValue(stringResource(R.string.sisa_2), MoneyFormatter.format(inv.balance))
 
-        state.statusError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        if (state.updating) CircularProgressIndicator()
+        state.statusError?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive }) }
+        if (state.updating) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                Text(stringResource(R.string.memperbarui_status), modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+            }
+        }
 
-        Button(onClick = onShare, modifier = Modifier.fillMaxWidth()) { Text("Bagikan") }
+        Button(onClick = onShare, modifier = Modifier.fillMaxWidth().minTouch()) { Text(stringResource(R.string.bagikan)) }
 
         // Tombol status hanya muncul bila feature flag aktif.
         InvoiceActions.availableTargets(inv.status, viewModel.flags).forEach { target ->
-            val label = when (target) {
-                InvoiceStatus.SENT -> "Tandai Sent"
-                InvoiceStatus.PAID -> "Tandai Paid"
-                InvoiceStatus.CANCELLED -> "Batalkan invoice"
-                else -> target
-            }
-            OutlinedButton(onClick = { viewModel.askStatus(target) }, enabled = !state.updating, modifier = Modifier.fillMaxWidth()) { Text(label) }
+            val label = InvoiceStatus.actionLabel(target)
+            OutlinedButton(onClick = { viewModel.askStatus(target) }, enabled = !state.updating, modifier = Modifier.fillMaxWidth().minTouch()) { Text(label) }
         }
     }
+}
+
+/**
+ * Konfirmasi sebelum teks invoice dikirim ke aplikasi lain. Menampilkan peringatan untuk Draft/Dibatalkan dan, bila profil
+ * punya rekening, pilihan "Sertakan rekening pembayaran" (default aktif untuk invoice yang masih perlu dibayar).
+ */
+@Composable
+fun ShareInvoiceDialog(data: InvoiceDetailData, onShare: (includeBank: Boolean) -> Unit, onDismiss: () -> Unit) {
+    val status = data.invoice.status
+    val hasBank = !data.profile?.bankAccount.isNullOrBlank()
+    var includeBank by remember { mutableStateOf(status != InvoiceStatus.PAID && status != InvoiceStatus.CANCELLED) }
+    val warning = when (status) {
+        InvoiceStatus.DRAFT -> "Invoice ini masih berstatus Draft (belum final). "
+        InvoiceStatus.CANCELLED -> "Invoice ini berstatus Dibatalkan, sehingga tidak perlu dibayar. "
+        else -> ""
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Bagikan invoice?") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(warning + "Teks yang dibagikan terkirim ke aplikasi pilihan Anda dan memuat data customer dan rincian tagihan.")
+                if (hasBank) {
+                    Row(
+                        Modifier.fillMaxWidth().minTouch().toggleable(
+                            value = includeBank,
+                            role = Role.Checkbox,
+                            onValueChange = { includeBank = it },
+                        ),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Checkbox(checked = includeBank, onCheckedChange = null)
+                        Text("Sertakan rekening pembayaran", modifier = Modifier.padding(start = 8.dp))
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { onShare(hasBank && includeBank) }) { Text("Bagikan") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Batal") } },
+    )
 }

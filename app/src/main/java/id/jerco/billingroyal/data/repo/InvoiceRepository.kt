@@ -14,6 +14,7 @@ import id.jerco.billingroyal.data.remote.InvoiceStatus
 import id.jerco.billingroyal.data.remote.NetworkFactory
 import id.jerco.billingroyal.data.remote.StatusRequest
 import id.jerco.billingroyal.data.remote.apiCall
+import id.jerco.billingroyal.data.remote.isOutcomeUncertain
 import java.security.MessageDigest
 import java.time.LocalDate
 import java.time.YearMonth
@@ -43,6 +44,8 @@ data class InvoiceDraft(
     val items: List<DraftItem>,
     val idempotencyKey: String? = null,
     val payloadHash: String? = null,
+    /** Bukan null bila percobaan kirim sebelumnya hasilnya belum pasti (lihat InvoiceDraftEntity.uncertainSince). */
+    val uncertainSince: Long? = null,
 )
 
 @Singleton
@@ -92,6 +95,10 @@ class InvoiceRepository @Inject constructor(
         if (draft.items.size > MAX_ITEMS) return ApiResult.Failure(clientValidation("Maksimal $MAX_ITEMS item per invoice."))
         if (draft.notes.length > MAX_NOTES) return ApiResult.Failure(clientValidation("Catatan maksimal $MAX_NOTES karakter."))
 
+        if (draft.items.map { it.serviceId }.toSet().size != draft.items.size) {
+            return ApiResult.Failure(clientValidation("Ada item (service) yang sama lebih dari sekali. Gabungkan qty-nya menjadi satu item."))
+        }
+
         val items = ArrayList<InvoiceItemRequest>(draft.items.size)
         for ((index, item) in draft.items.withIndex()) {
             val qty = MoneyParser.parseQuantity(item.qtyText)
@@ -131,10 +138,26 @@ class InvoiceRepository @Inject constructor(
         } else {
             UUID.randomUUID().toString()
         }
-        saveDraft(draft.copy(idempotencyKey = key, payloadHash = hash))
+        val ticket = scope.ticket()
+        // Key + hash + penanda "sedang dikirim" ditulis ke Room SEBELUM request. Bila proses mati di tengah
+        // request, penanda ini membuat dialog "Status penyimpanan belum pasti" muncul lagi saat dibuka.
+        val previousMarker = draftDao.get(ticket.key)?.uncertainSince
+        draftDao.upsert(
+            draft.copy(idempotencyKey = key, payloadHash = hash).toEntity(ticket.key, uncertainSince = previousMarker ?: now()),
+        )
 
         val result = apiCall { api.createInvoice(key, request) }
-        if (result is ApiResult.Success) draftDao.delete(scope.scopeKey)
+        // Sesi sudah berakhir/ganti selama request: jangan menyentuh Room (sudah di-wipe atau milik akun lain).
+        if (!scope.isCurrent(ticket)) return result
+        when (result) {
+            is ApiResult.Success -> draftDao.delete(ticket.key)
+            is ApiResult.Failure ->
+                // Gagal PASTI (validasi/4xx, tidak terkirim) pada percobaan pertama: penanda dihapus.
+                // Bila sebelumnya sudah pernah tidak pasti, penanda dipertahankan sampai sukses/dikosongkan.
+                if (!result.error.isOutcomeUncertain && previousMarker == null) {
+                    draftDao.get(ticket.key)?.let { draftDao.upsert(it.copy(uncertainSince = null)) }
+                }
+        }
         return result
     }
 
@@ -146,7 +169,7 @@ class InvoiceRepository @Inject constructor(
             InvoiceStatus.CANCELLED -> flags.cancelInvoice
             else -> false
         }
-        if (!allowed) return ApiResult.Failure(clientValidation("Perubahan status ke \"$status\" dinonaktifkan."))
+        if (!allowed) return ApiResult.Failure(clientValidation("Perubahan status ke \"${InvoiceStatus.label(status)}\" dinonaktifkan."))
         return apiCall { api.updateInvoiceStatus(id, StatusRequest(status)) }
     }
 
@@ -166,25 +189,33 @@ class InvoiceRepository @Inject constructor(
             },
             idempotencyKey = e.idempotencyKey,
             payloadHash = e.payloadHash,
+            uncertainSince = e.uncertainSince,
         )
     }
 
+    /** Simpan draft (autosave). Penanda "belum pasti" yang sudah ada TIDAK ditimpa oleh autosave. */
     suspend fun saveDraft(draft: InvoiceDraft) {
-        draftDao.upsert(
-            InvoiceDraftEntity(
-                scope = scope.scopeKey,
-                customerId = draft.customerId,
-                customerName = draft.customerName,
-                priceListId = draft.priceListId,
-                invoiceDate = AppDates.apiDate(draft.invoiceDate),
-                notes = draft.notes,
-                itemsJson = NetworkFactory.json.encodeToString(draft.items),
-                idempotencyKey = draft.idempotencyKey,
-                payloadHash = draft.payloadHash,
-                updatedAt = System.currentTimeMillis(),
-            ),
-        )
+        val ticket = scope.ticket()
+        val marker = draftDao.get(ticket.key)?.uncertainSince
+        if (!scope.isCurrent(ticket)) return
+        draftDao.upsert(draft.toEntity(ticket.key, uncertainSince = marker))
     }
+
+    private fun InvoiceDraft.toEntity(scopeKey: String, uncertainSince: Long?) = InvoiceDraftEntity(
+        scope = scopeKey,
+        customerId = customerId,
+        customerName = customerName,
+        priceListId = priceListId,
+        invoiceDate = AppDates.apiDate(invoiceDate),
+        notes = notes,
+        itemsJson = NetworkFactory.json.encodeToString(items),
+        idempotencyKey = idempotencyKey,
+        payloadHash = payloadHash,
+        updatedAt = now(),
+        uncertainSince = uncertainSince,
+    )
+
+    private fun now() = System.currentTimeMillis()
 
     suspend fun clearDraft() = draftDao.delete(scope.scopeKey)
 

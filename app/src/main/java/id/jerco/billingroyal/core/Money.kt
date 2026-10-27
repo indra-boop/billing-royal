@@ -4,6 +4,7 @@ import java.math.BigDecimal
 import java.math.RoundingMode
 import java.text.DecimalFormat
 import java.text.DecimalFormatSymbols
+import java.util.Locale
 
 /**
  * Parser input uang/qty dari pengguna. Seluruh hasil berupa BigDecimal (tidak pernah tipe floating point).
@@ -17,22 +18,24 @@ object MoneyParser {
     private val GROUPED_INT = Regex("^\\d{1,3}(\\.\\d{3})+$")
     private val PLAIN_INT = Regex("^\\d+$")
     private val DOT_DECIMAL = Regex("^\\d+\\.\\d{1,2}$")
+    private val RP_PREFIX = Regex("^[\\s\u00A0]*Rp[\\s\u00A0]*", RegexOption.IGNORE_CASE)
     private val QTY = Regex("^\\d+([.,]\\d{1,2})?$")
 
     fun parseAmount(input: String?, maxScale: Int = 2): BigDecimal? {
         if (input == null) return null
-        val s = input.replace("Rp", "", ignoreCase = true)
+        // Awalan "Rp" hanya dihapus di AWAL input ("15Rp000" ditolak). Hanya digit ASCII 0-9 yang diterima.
+        val s = input.replace(RP_PREFIX, "")
             .replace(" ", "")
             .replace("\u00A0", "")
         if (s.isEmpty()) return null
-        if (s.any { !it.isDigit() && it != '.' && it != ',' }) return null
+        if (s.any { it !in '0'..'9' && it != '.' && it != ',' }) return null
 
         val result: BigDecimal = when {
             ',' in s -> {
                 if (s.count { it == ',' } > 1) return null
                 val intPart = s.substringBefore(',')
                 val fracPart = s.substringAfter(',')
-                if (fracPart.isEmpty() || fracPart.length > maxScale || !fracPart.all { it.isDigit() }) return null
+                if (fracPart.isEmpty() || fracPart.length > maxScale || !fracPart.all { it in '0'..'9' }) return null
                 val intDigits = when {
                     intPart.isEmpty() -> return null
                     PLAIN_INT.matches(intPart) -> intPart
@@ -63,7 +66,9 @@ object MoneyParser {
 
 /** Format tampilan uang locale id-ID: "Rp 15.000". Deterministik (simbol ditetapkan eksplisit). */
 object MoneyFormatter {
-    private fun symbols() = DecimalFormatSymbols().apply {
+    // Dasar locale id-ID (digit Latin 0-9 tetap, tidak mengikuti locale perangkat); pemisah ditetapkan eksplisit.
+    private fun symbols() = DecimalFormatSymbols(Locale.forLanguageTag("id-ID")).apply {
+        zeroDigit = '0'
         groupingSeparator = '.'
         decimalSeparator = ','
     }

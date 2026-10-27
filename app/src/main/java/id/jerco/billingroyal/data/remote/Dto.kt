@@ -188,6 +188,26 @@ object InvoiceStatus {
     const val PAID = "Paid"
     const val CANCELLED = "Cancelled"
     val ALL = listOf(DRAFT, SENT, PAID, CANCELLED)
+
+    /**
+     * Label tampilan (Indonesia). Nilai wire ke/dari API tetap Inggris ("Draft", "Sent", "Paid", "Cancelled");
+     * fungsi ini HANYA untuk teks di layar dan teks bagikan. Nilai tak dikenal tampil apa adanya.
+     */
+    fun label(status: String): String = when (status) {
+        DRAFT -> "Draft"
+        SENT -> "Terkirim"
+        PAID -> "Lunas"
+        CANCELLED -> "Dibatalkan"
+        else -> status
+    }
+
+    /** Teks tombol aksi perubahan status. */
+    fun actionLabel(target: String): String = when (target) {
+        SENT -> "Tandai Terkirim"
+        PAID -> "Tandai Lunas"
+        CANCELLED -> "Batalkan invoice"
+        else -> "Ubah ke ${label(target)}"
+    }
 }
 
 // ---------------------------------------------------------------- Expense

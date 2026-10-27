@@ -12,6 +12,19 @@ fun prop(name: String): String =
 
 fun flag(name: String): String = prop(name).toBooleanStrict().toString()
 
+// ---- Validasi BASE_URL. Bentuk (https, akhiran "/", tanpa tanda kutip/backslash/spasi) divalidasi SELALU;
+// host placeholder (STAGING-HOST / PROD-HOST) hanya boleh di build debug dan DITOLAK untuk assembleRelease/bundleRelease.
+val placeholderHost = Regex("(STAGING|PROD)-HOST", RegexOption.IGNORE_CASE)
+
+fun checkBaseUrlShape(name: String, url: String) {
+    require(url.startsWith("https://")) { "$name harus diawali https:// (nilai saat ini: '$url')" }
+    require(url.endsWith("/")) { "$name harus diakhiri '/' (nilai saat ini: '$url')" }
+    require(url.none { it == '"' || it == '\\' || it.isWhitespace() }) { "$name tidak boleh memuat tanda kutip, backslash, atau spasi" }
+}
+
+val debugBaseUrl = prop("billing.baseUrl.debug").also { checkBaseUrlShape("billing.baseUrl.debug", it) }
+val releaseBaseUrl = prop("billing.baseUrl.release").also { checkBaseUrlShape("billing.baseUrl.release", it) }
+
 android {
     // Namespace = paket kode sumber (tetap). applicationId dapat diganti di gradle.properties.
     namespace = "id.jerco.billingroyal"
@@ -47,13 +60,13 @@ android {
 
     buildTypes {
         debug {
-            buildConfigField("String", "BASE_URL", "\"${prop("billing.baseUrl.debug")}\"")
+            buildConfigField("String", "BASE_URL", "\"$debugBaseUrl\"")
         }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            buildConfigField("String", "BASE_URL", "\"${prop("billing.baseUrl.release")}\"")
+            buildConfigField("String", "BASE_URL", "\"$releaseBaseUrl\"")
             signingConfigs.findByName("release")?.let { signingConfig = it }
         }
     }
@@ -106,7 +119,7 @@ dependencies {
     implementation(libs.retrofit)
     implementation(libs.retrofit.kotlinx.serialization)
     implementation(libs.okhttp)
-    implementation(libs.okhttp.logging)
+    debugImplementation(libs.okhttp.logging) // logging HTTP hanya untuk build debug (tidak ikut APK release)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
 
@@ -115,9 +128,31 @@ dependencies {
     ksp(libs.androidx.room.compiler)
 
     implementation(libs.androidx.datastore.preferences)
+    implementation(libs.androidx.core.splashscreen)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlin.test.junit)
     testImplementation(libs.okhttp.mockwebserver)
     testImplementation(libs.kotlinx.coroutines.test)
 }
+
+// ---- Guard release: gagal bila BASE_URL masih placeholder. Dipasang hanya pada task yang menghasilkan
+// artefak release, supaya `./gradlew test` dan `assembleDebug` tetap jalan dengan placeholder.
+val verifyReleaseConfig by tasks.registering {
+    group = "verification"
+    description = "Gagal bila billing.baseUrl.release masih placeholder (PROD-HOST/STAGING-HOST)."
+    val url = releaseBaseUrl
+    val flagsOn = listOf("markPaid", "cancelInvoice", "priceOverride", "delete")
+        .filter { providers.gradleProperty("billing.flag.$it").orNull == "true" }
+    doLast {
+        require(!placeholderHost.containsMatchIn(url)) {
+            "billing.baseUrl.release masih placeholder ('$url'). Isi URL API produksi sebelum membuat build release " +
+                "(gradle.properties atau -Pbilling.baseUrl.release=https://host/path/)."
+        }
+        if (flagsOn.isNotEmpty()) {
+            logger.warn("PERINGATAN: feature flag aktif di build release: $flagsOn (default seharusnya false).")
+        }
+    }
+}
+tasks.matching { it.name in setOf("assembleRelease", "bundleRelease", "packageRelease", "packageReleaseBundle") }
+    .configureEach { dependsOn(verifyReleaseConfig) }

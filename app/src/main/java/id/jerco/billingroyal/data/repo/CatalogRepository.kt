@@ -25,10 +25,11 @@ class CatalogRepository @Inject constructor(
 ) {
     suspend fun services(q: String): ApiResult<List<ServiceDto>> {
         val query = q.trim()
-        val key = scope.scopeKey
+        val ticket = scope.ticket()
+        val key = ticket.key
         return when (val result = apiCall { api.services(query.ifEmpty { null }) }) {
             is ApiResult.Success -> {
-                if (query.isEmpty()) {
+                if (query.isEmpty() && scope.isCurrent(ticket)) {
                     dao.deleteServices(key)
                     dao.upsertServices(result.data.map { ServiceEntity(key, it.id, it.item_code, it.category, it.name, it.unit) })
                 }
@@ -47,11 +48,14 @@ class CatalogRepository @Inject constructor(
     }
 
     suspend fun priceLists(): ApiResult<List<PriceListSummaryDto>> {
-        val key = scope.scopeKey
+        val ticket = scope.ticket()
+        val key = ticket.key
         return when (val result = apiCall { api.priceLists() }) {
             is ApiResult.Success -> {
-                dao.deletePriceLists(key)
-                dao.upsertPriceLists(result.data.map { PriceListEntity(key, it.id, it.name, it.item_count) })
+                if (scope.isCurrent(ticket)) {
+                    dao.deletePriceLists(key)
+                    dao.upsertPriceLists(result.data.map { PriceListEntity(key, it.id, it.name, it.item_count) })
+                }
                 result
             }
             is ApiResult.Failure -> {
@@ -67,15 +71,18 @@ class CatalogRepository @Inject constructor(
     }
 
     suspend fun priceList(id: Long): ApiResult<PriceListDetailDto> {
-        val key = scope.scopeKey
+        val ticket = scope.ticket()
+        val key = ticket.key
         return when (val result = apiCall { api.priceList(id) }) {
             is ApiResult.Success -> {
-                dao.deletePriceListItems(key, id)
-                dao.upsertPriceListItems(
-                    result.data.items.map {
-                        PriceListItemEntity(key, id, it.service_id, it.item_code, it.category, it.service_name, it.unit, it.price.toPlainString())
-                    },
-                )
+                if (scope.isCurrent(ticket)) {
+                    dao.deletePriceListItems(key, id)
+                    dao.upsertPriceListItems(
+                        result.data.items.map {
+                            PriceListItemEntity(key, id, it.service_id, it.item_code, it.category, it.service_name, it.unit, it.price.toPlainString())
+                        },
+                    )
+                }
                 result
             }
             is ApiResult.Failure -> {

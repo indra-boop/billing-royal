@@ -1,5 +1,7 @@
 package id.jerco.billingroyal.data.remote
 
+import id.jerco.billingroyal.data.local.SessionEvent
+import okhttp3.Call
 import okhttp3.Interceptor
 import okhttp3.Request
 import okhttp3.Response
@@ -14,16 +16,22 @@ class AuthInterceptor(private val tokenProvider: () -> String?) : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
         if (request.isPublicEndpoint()) return chain.proceed(request)
+        if (request.header("Authorization") != null) return chain.proceed(request) // mis. revoke token lama
         val token = tokenProvider() ?: return chain.proceed(request)
         return chain.proceed(request.newBuilder().header("Authorization", "Bearer $token").build())
     }
 }
 
+internal fun Request.bearerToken(): String? =
+    header("Authorization")?.removePrefix("Bearer ")?.trim()?.takeIf { it.isNotEmpty() }
+
 /**
- * Mendeteksi 401 (unauthenticated/invalid_token) dan 403 account_inactive dari endpoint terproteksi,
- * lalu memanggil [onSessionInvalid] (hapus token + Room + DataStore, kembali ke Login).
+ * Mendeteksi 401 dengan kode `unauthenticated`/`invalid_token` dan 403 `account_inactive` dari endpoint
+ * terproteksi, lalu memanggil [onSessionInvalid] dengan token yang DIPAKAI request itu (penerima hanya
+ * boleh menghapus sesi bila token tersebut masih aktif). 401 tanpa kode yang dikenal (body kosong,
+ * bukan JSON, HTML dari proxy) tidak menghapus sesi.
  */
-class SessionInterceptor(private val onSessionInvalid: () -> Unit) : Interceptor {
+class SessionInterceptor(private val onSessionInvalid: (token: String?, reason: SessionEvent, call: Call) -> Unit) : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
         val response = chain.proceed(request)
@@ -35,7 +43,10 @@ class SessionInterceptor(private val onSessionInvalid: () -> Unit) : Interceptor
                 null
             }
             val error = ErrorMapper.fromHttp(response.code, body)
-            if (ErrorMapper.isSessionTerminating(error.status, error.code)) onSessionInvalid()
+            if (ErrorMapper.isSessionTerminating(error.status, error.code)) {
+                val reason = if (response.code == 403) SessionEvent.ACCOUNT_INACTIVE else SessionEvent.EXPIRED
+                onSessionInvalid(request.bearerToken(), reason, chain.call())
+            }
         }
         return response
     }

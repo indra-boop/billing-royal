@@ -44,12 +44,13 @@ class CustomerRepository @Inject constructor(
 ) {
     suspend fun list(q: String, page: Int, perPage: Int = PER_PAGE): ApiResult<Paged<CustomerDto>> {
         val query = q.trim()
+        val ticket = scope.ticket() // diambil SEBELUM request: scope/generasi tidak boleh dibaca setelah respons
+        val key = ticket.key
         val result = apiCall { api.customers(query.ifEmpty { null }, page, perPage) }
         return when (result) {
             is ApiResult.Success -> {
-                val key = scope.scopeKey
-                // Cache hanya untuk tampilan: simpan hasil daftar tanpa filter.
-                if (query.isEmpty()) {
+                // Cache hanya untuk tampilan: simpan hasil daftar tanpa filter, dan hanya bila sesi masih sama.
+                if (query.isEmpty() && scope.isCurrent(ticket)) {
                     if (page == 1) dao.deleteAll(key)
                     dao.upsert(result.data.map { it.toEntity(key) })
                 }
@@ -57,7 +58,7 @@ class CustomerRepository @Inject constructor(
             }
             is ApiResult.Failure -> {
                 if (result.error is AppError.Network) {
-                    val cached = dao.search(scope.scopeKey, query, perPage, (page - 1) * perPage)
+                    val cached = dao.search(key, query, perPage, (page - 1) * perPage)
                     if (cached.isNotEmpty() || page > 1) {
                         // Halaman cache terakhir ditandai tidak memiliki lanjutan bila kurang dari perPage.
                         val hasMore = cached.size >= perPage
@@ -72,33 +73,41 @@ class CustomerRepository @Inject constructor(
     }
 
     suspend fun get(id: Long): ApiResult<CustomerDto> {
+        val ticket = scope.ticket()
         val result = apiCall { api.customer(id) }
-        if (result is ApiResult.Success) dao.upsert(listOf(result.data.toEntity(scope.scopeKey)))
+        cacheIfCurrent(ticket, result)
         return result
     }
 
     suspend fun create(idempotencyKey: String, input: CustomerInput): ApiResult<CustomerDto> {
+        val ticket = scope.ticket()
         val result = apiCall { api.createCustomer(idempotencyKey, input.toJson()) }
-        if (result is ApiResult.Success) dao.upsert(listOf(result.data.toEntity(scope.scopeKey)))
+        cacheIfCurrent(ticket, result)
         return result
     }
 
     /** PUT dengan seluruh field. */
     suspend fun update(id: Long, input: CustomerInput): ApiResult<CustomerDto> {
+        val ticket = scope.ticket()
         val result = apiCall { api.updateCustomer(id, input.toJson()) }
-        if (result is ApiResult.Success) dao.upsert(listOf(result.data.toEntity(scope.scopeKey)))
+        cacheIfCurrent(ticket, result)
         return result
     }
 
     suspend fun delete(id: Long): ApiResult<Unit> {
         if (!flags.delete) return ApiResult.Failure(clientValidation("Hapus customer dinonaktifkan."))
+        val ticket = scope.ticket()
         return when (val result = apiCall { api.deleteCustomer(id) }) {
             is ApiResult.Success -> {
-                dao.deleteById(scope.scopeKey, id)
+                if (scope.isCurrent(ticket)) dao.deleteById(ticket.key, id)
                 ApiResult.Success(Unit)
             }
             is ApiResult.Failure -> result
         }
+    }
+
+    private suspend fun cacheIfCurrent(ticket: ScopeTicket, result: ApiResult<CustomerDto>) {
+        if (result is ApiResult.Success && scope.isCurrent(ticket)) dao.upsert(listOf(result.data.toEntity(ticket.key)))
     }
 
     private fun CustomerDto.toEntity(scope: String) =

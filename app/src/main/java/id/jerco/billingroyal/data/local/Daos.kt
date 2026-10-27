@@ -69,6 +69,18 @@ interface ProfileDao {
 }
 
 @Dao
+interface PendingIdempotencyDao {
+    @Query("SELECT * FROM pending_idempotency WHERE scope = :scope AND kind = :kind")
+    suspend fun get(scope: String, kind: String): PendingIdempotencyEntity?
+
+    @Upsert
+    suspend fun upsert(row: PendingIdempotencyEntity)
+
+    @Query("DELETE FROM pending_idempotency WHERE scope = :scope AND kind = :kind")
+    suspend fun delete(scope: String, kind: String)
+}
+
+@Dao
 interface DraftDao {
     @Query("SELECT * FROM invoice_drafts WHERE scope = :scope")
     suspend fun get(scope: String): InvoiceDraftEntity?

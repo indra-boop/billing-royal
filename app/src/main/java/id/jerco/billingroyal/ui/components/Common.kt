@@ -1,5 +1,23 @@
 package id.jerco.billingroyal.ui.components
 
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.res.stringResource
+import id.jerco.billingroyal.R
+import androidx.compose.ui.unit.Dp
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.res.colorResource
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.background
+import androidx.compose.foundation.Image
+import id.jerco.billingroyal.data.remote.InvoiceStatus
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -46,8 +64,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import id.jerco.billingroyal.core.AppDates
 import id.jerco.billingroyal.ui.theme.StatusColors
-import id.jerco.billingroyal.ui.theme.WarningContainer
-import id.jerco.billingroyal.ui.theme.WarningContent
+import id.jerco.billingroyal.ui.theme.WarningColors
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
@@ -60,6 +77,7 @@ fun AppScaffold(
     snackbarHostState: SnackbarHostState? = null,
     actions: @Composable () -> Unit = {},
     floatingActionButton: @Composable () -> Unit = {},
+    bottomBar: @Composable () -> Unit = {},
     content: @Composable (PaddingValues) -> Unit,
 ) {
     Scaffold(
@@ -69,7 +87,7 @@ fun AppScaffold(
                 navigationIcon = {
                     if (onBack != null) {
                         IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Kembali")
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.kembali))
                         }
                     }
                 },
@@ -78,6 +96,7 @@ fun AppScaffold(
         },
         snackbarHost = { snackbarHostState?.let { SnackbarHost(it) } },
         floatingActionButton = floatingActionButton,
+        bottomBar = bottomBar,
         content = content,
     )
 }
@@ -94,28 +113,64 @@ fun <T> LoadStateView(
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
     isEmpty: (T) -> Boolean = { false },
-    emptyMessage: String = "Belum ada data.",
+    emptyMessage: String = stringResource(R.string.belum_ada_data),
+    /** Tombol ajakan (CTA) di bawah teks kosong, mis. "Tambah customer". */
+    emptyAction: (@Composable () -> Unit)? = null,
+    /** True bila data yang tampil berasal dari cache (offline): banner konsisten di semua layar berdaftar. */
+    fromCache: Boolean = false,
     content: @Composable (T) -> Unit,
 ) {
-    PullToRefreshBox(isRefreshing = refreshing, onRefresh = onRefresh, modifier = modifier.fillMaxSize()) {
-        when (state) {
-            Load.Loading -> CenteredScroll {
-                CircularProgressIndicator()
-                Spacer(Modifier.height(12.dp))
-                Text("Memuat...")
-            }
-            is Load.Error -> CenteredScroll {
-                Text(state.message, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.error)
-                Spacer(Modifier.height(12.dp))
-                Button(onClick = onRetry) { Text("Coba lagi") }
-            }
-            is Load.Content -> if (isEmpty(state.data)) {
-                CenteredScroll { Text(emptyMessage, style = MaterialTheme.typography.bodyLarge) }
-            } else {
-                content(state.data)
+    Column(modifier.fillMaxSize()) {
+        if (fromCache && state is Load.Content) OfflineBanner()
+        PullToRefreshBox(isRefreshing = refreshing, onRefresh = onRefresh, modifier = Modifier.fillMaxSize()) {
+            when (state) {
+                Load.Loading -> CenteredScroll {
+                    CircularProgressIndicator()
+                    Spacer(Modifier.height(12.dp))
+                    Text(stringResource(R.string.memuat), modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+                }
+                is Load.Error -> CenteredScroll {
+                    Text(
+                        state.message,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Button(onClick = onRetry, modifier = Modifier.minTouch()) { Text(stringResource(R.string.coba_lagi)) }
+                }
+                is Load.Content -> if (isEmpty(state.data)) {
+                    CenteredScroll {
+                        Text(emptyMessage, style = MaterialTheme.typography.bodyLarge)
+                        if (emptyAction != null) {
+                            Spacer(Modifier.height(12.dp))
+                            emptyAction()
+                        }
+                    }
+                } else {
+                    content(state.data)
+                }
             }
         }
     }
+}
+
+/**
+ * Muat ulang (tanpa menghapus daftar yang tampil) saat layar kembali aktif, mis. setelah membuat/mengubah data di layar lain.
+ * Pemanggilan pertama saat layar baru dibuka dilewati karena ViewModel sudah memuat sendiri.
+ */
+@Composable
+fun RefreshOnResume(onRefresh: () -> Unit) {
+    var first by remember { mutableStateOf(true) }
+    androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+        if (first) first = false else onRefresh()
+    }
+}
+
+/** Banner offline yang sama di semua layar yang melayani data cache; diumumkan ke pembaca layar saat muncul. */
+@Composable
+fun OfflineBanner(modifier: Modifier = Modifier) {
+    InfoBanner(stringResource(R.string.tidak_ada_koneksi_menampilkan_data), modifier.semantics { liveRegion = LiveRegionMode.Polite })
 }
 
 @Composable
@@ -139,7 +194,7 @@ fun StatusBadge(status: String, modifier: Modifier = Modifier) {
         contentColor = StatusColors.content(status),
     ) {
         Text(
-            text = status,
+            text = InvoiceStatus.label(status),
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp),
             style = MaterialTheme.typography.labelMedium,
             fontWeight = FontWeight.SemiBold,
@@ -150,7 +205,7 @@ fun StatusBadge(status: String, modifier: Modifier = Modifier) {
 /** Peringatan kuning (mis. harga item bernilai 0). */
 @Composable
 fun WarningBox(message: String, modifier: Modifier = Modifier) {
-    Surface(modifier = modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), color = WarningContainer, contentColor = WarningContent) {
+    Surface(modifier = modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), color = WarningColors.container, contentColor = WarningColors.content) {
         Text(message, modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium)
     }
 }
@@ -173,39 +228,70 @@ fun ConfirmDialog(
     confirmText: String,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
+    /** Aksi merusak (hapus/keluar): tombol konfirmasi berwarna error agar tidak tertukar dengan konfirmasi biasa. */
+    destructive: Boolean = false,
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = { Text(message) },
-        confirmButton = { TextButton(onClick = onConfirm) { Text(confirmText) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Batal") } },
+        confirmButton = {
+            TextButton(
+                onClick = onConfirm,
+                colors = if (destructive) ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error) else ButtonDefaults.textButtonColors(),
+            ) { Text(confirmText) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.batal)) } },
     )
 }
 
-/** Dialog hasil tidak pasti setelah timeout/network error pada request tulis. Tidak ada auto-retry. */
+/**
+ * Dialog hasil tidak pasti setelah timeout/network error pada request tulis. Tidak ada auto-retry.
+ * Aksi utama (tombol terisi) adalah "Periksa ...". "Kirim ulang" butuh konfirmasi kedua yang
+ * menjelaskan risiko data ganda; pada konfirmasi itu "Batal" adalah tombol terisi (pilihan aman).
+ */
 @Composable
 fun UncertainDialog(
     message: String,
     onCheck: () -> Unit,
     onResend: () -> Unit,
     onDismiss: () -> Unit,
+    title: String = stringResource(R.string.data_mungkin_sudah_tersimpan),
+    checkLabel: String = stringResource(R.string.periksa_daftar),
+    resendTitle: String = stringResource(R.string.kirim_ulang),
+    /** Penjelasan kecil di bawah isi tentang apa yang terjadi bila dialog ditutup ("Nanti"). */
+    dismissHint: String? = null,
+    resendWarning: String = stringResource(R.string.peringatan_kirim_ulang_umum),
     extra: @Composable () -> Unit = {},
 ) {
+    var confirmResend by remember { mutableStateOf(false) }
+    if (confirmResend) {
+        AlertDialog(
+            onDismissRequest = { confirmResend = false },
+            title = { Text(resendTitle) },
+            text = { Text(resendWarning) },
+            confirmButton = { TextButton(onClick = { confirmResend = false; onResend() }) { Text(stringResource(R.string.ya_kirim_ulang)) } },
+            dismissButton = { Button(onClick = { confirmResend = false }) { Text(stringResource(R.string.batal)) } },
+        )
+        return
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Status penyimpanan belum pasti") },
+        title = { Text(title) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.verticalScroll(rememberScrollState())) {
                 Text(message)
                 extra()
+                if (dismissHint != null) {
+                    Text(dismissHint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
         },
-        confirmButton = { TextButton(onClick = onCheck) { Text("Periksa daftar") } },
+        confirmButton = { Button(onClick = onCheck, modifier = Modifier.minTouch()) { Text(checkLabel) } },
         dismissButton = {
             Row {
-                TextButton(onClick = onResend) { Text("Kirim ulang") }
-                TextButton(onClick = onDismiss) { Text("Tutup") }
+                TextButton(onClick = { confirmResend = true }) { Text(stringResource(R.string.kirim_ulang_dots)) }
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.nanti)) }
             }
         },
     )
@@ -221,7 +307,7 @@ fun DateField(
     enabled: Boolean = true,
 ) {
     var open by remember { mutableStateOf(false) }
-    OutlinedButton(onClick = { open = true }, modifier = modifier, enabled = enabled) {
+    OutlinedButton(onClick = { open = true }, modifier = modifier.minTouch(), enabled = enabled) {
         Text("$label: ${AppDates.display(date)}")
     }
     if (open) {
@@ -234,9 +320,9 @@ fun DateField(
                         onDateChange(Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate())
                     }
                     open = false
-                }) { Text("Pilih") }
+                }) { Text(stringResource(R.string.pilih)) }
             },
-            dismissButton = { TextButton(onClick = { open = false }) { Text("Batal") } },
+            dismissButton = { TextButton(onClick = { open = false }) { Text(stringResource(R.string.batal)) } },
         ) { DatePicker(state = state) }
     }
 }
@@ -249,13 +335,21 @@ fun LabeledValue(label: String, value: String, modifier: Modifier = Modifier) {
     }
 }
 
+/**
+ * Tombol simpan. Saat [saving] tombol TIDAK dinonaktifkan secara visual (hanya klik yang dikunci), supaya spinner tetap
+ * tampil di atas warna primary dengan kontras cukup (UI-02).
+ */
 @Composable
 fun SavingButton(text: String, saving: Boolean, enabled: Boolean = true, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    Button(onClick = onClick, enabled = enabled && !saving, modifier = modifier.fillMaxWidth()) {
+    Button(
+        onClick = { if (!saving) onClick() },
+        enabled = enabled,
+        modifier = modifier.fillMaxWidth().minTouch().semantics { if (saving) stateDescription = "Sedang menyimpan" },
+    ) {
         if (saving) {
-            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
-            Spacer(Modifier.size(8.dp))
-            Text("Menyimpan...")
+            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = LocalContentColor.current)
+            Spacer(Modifier.width(8.dp))
+            Text(stringResource(R.string.menyimpan))
         } else {
             Text(text)
         }
@@ -265,4 +359,20 @@ fun SavingButton(text: String, saving: Boolean, enabled: Boolean = true, onClick
 @Composable
 fun CenteredBox(content: @Composable () -> Unit) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { content() }
+}
+
+
+/** Tinggi minimum 48dp untuk aksi utama (target sentuh Material/Android a11y). */
+fun Modifier.minTouch(): Modifier = this.heightIn(min = 48.dp)
+
+/**
+ * Tanda merek PLACEHOLDER (huruf "B" di atas warna seed). Dipakai di Login dan sebagai cadangan bila bisnis belum punya logo.
+ * Bukan logo laundry asli: ganti drawable `ic_launcher_foreground`/warna `brand_seed` setelah pemilik menyerahkan asetnya.
+ * Dekoratif (contentDescription null) karena nama aplikasi/bisnis selalu tampil di dekatnya.
+ */
+@Composable
+fun BrandMark(modifier: Modifier = Modifier, size: Dp = 72.dp) {
+    Box(modifier.size(size).clip(CircleShape).background(colorResource(R.color.brand_seed))) {
+        Image(painterResource(R.drawable.ic_launcher_foreground), contentDescription = null, modifier = Modifier.size(size))
+    }
 }

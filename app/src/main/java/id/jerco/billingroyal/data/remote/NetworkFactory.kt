@@ -24,6 +24,8 @@ object NetworkFactory {
             .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .readTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .retryOnConnectionFailure(false) // tidak ada retry diam-diam untuk request tulis
+            .followRedirects(false)          // API v1 tidak mengalihkan; jangan ikuti redirect diam-diam
+            .followSslRedirects(false)
             .apply {
                 interceptors.forEach(::addInterceptor)
                 networkInterceptors.forEach(::addNetworkInterceptor)
