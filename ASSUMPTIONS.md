@@ -205,7 +205,7 @@ tidak ada UI test): tata letak, fokus/TalkBack, IME/autofill, `imePadding` pada 
 - UX-05 pilih banyak item sekaligus / pintasan customer terakhir: perubahan alur, perlu keputusan produk.
 - UX-04 butir "masuk Home saat offline": bertentangan dengan online-first/server authoritative.
 - UX-07 teruskan filter (customer/tanggal) ke Daftar Invoice dan UX-16 tombol "Tambah customer baru" di picker: perlu perubahan argumen navigasi/alur form.
-- UX-12 pemulihan isian form setelah proses dimatikan sistem: butuh penyimpanan draft form (bertentangan dengan aturan tanpa data sensitif lokal tambahan bila tidak diputuskan pemilik).
+- UX-12 pemulihan isian form setelah proses dimatikan sistem: butuh menyimpan isian form (nama/telepon/alamat) di penyimpanan lokal plaintext; perlu keputusan pemilik (terkait SQLCipher dan aturan wipe).
 - UX-14 satu tombol Bagikan tanpa dialog untuk Draft: dialog T16 (review Hacker) sengaja dipertahankan.
 - UX-20 glosarium istilah penuh dan UX-22 penanda cache pada picker: perlu keputusan istilah / data sumber cache.
 - UX-21/UI-20/UI-17 (font scaling, layar lebar, `adjustResize` + `imePadding`): perlu verifikasi di perangkat; UI-05 sisa string Kotlin (pesan galat VM
