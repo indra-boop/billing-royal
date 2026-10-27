@@ -1,0 +1,62 @@
+package id.jerco.billingroyal.data.remote
+
+import okhttp3.Interceptor
+import okhttp3.Request
+import okhttp3.Response
+
+internal fun Request.isPublicEndpoint(): Boolean {
+    val path = url.encodedPath.trimEnd('/')
+    return path.endsWith("/health") || path.endsWith("/auth/login")
+}
+
+/** Menambahkan "Authorization: Bearer <token>" ke semua endpoint kecuali /health dan /auth/login. */
+class AuthInterceptor(private val tokenProvider: () -> String?) : Interceptor {
+    override fun intercept(chain: Interceptor.Chain): Response {
+        val request = chain.request()
+        if (request.isPublicEndpoint()) return chain.proceed(request)
+        val token = tokenProvider() ?: return chain.proceed(request)
+        return chain.proceed(request.newBuilder().header("Authorization", "Bearer $token").build())
+    }
+}
+
+/**
+ * Mendeteksi 401 (unauthenticated/invalid_token) dan 403 account_inactive dari endpoint terproteksi,
+ * lalu memanggil [onSessionInvalid] (hapus token + Room + DataStore, kembali ke Login).
+ */
+class SessionInterceptor(private val onSessionInvalid: () -> Unit) : Interceptor {
+    override fun intercept(chain: Interceptor.Chain): Response {
+        val request = chain.request()
+        val response = chain.proceed(request)
+        if (request.isPublicEndpoint()) return response
+        if (response.code == 401 || response.code == 403) {
+            val body = try {
+                response.peekBody(PEEK_LIMIT).string()
+            } catch (_: Exception) {
+                null
+            }
+            val error = ErrorMapper.fromHttp(response.code, body)
+            if (ErrorMapper.isSessionTerminating(error.status, error.code)) onSessionInvalid()
+        }
+        return response
+    }
+
+    private companion object {
+        const val PEEK_LIMIT = 16L * 1024
+    }
+}
+
+/** Menambahkan "Content-Type: application/json" untuk request ber-body (selain yang sudah diatur converter). */
+class JsonHeadersInterceptor : Interceptor {
+    override fun intercept(chain: Interceptor.Chain): Response {
+        val request = chain.request()
+        return chain.proceed(request.newBuilder().header("Accept", "application/json").build())
+    }
+}
+
+/** Logging hanya untuk endpoint selain /auth/login. Level BASIC (tanpa header dan tanpa body). */
+class LoginExcludingInterceptor(private val delegate: Interceptor) : Interceptor {
+    override fun intercept(chain: Interceptor.Chain): Response {
+        if (chain.request().url.encodedPath.trimEnd('/').endsWith("/auth/login")) return chain.proceed(chain.request())
+        return delegate.intercept(chain)
+    }
+}

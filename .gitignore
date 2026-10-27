@@ -1,0 +1,26 @@
+# Gradle / build
+.gradle/
+build/
+**/build/
+.kotlin/
+*.apk
+*.aab
+*.ap_
+
+# Konfigurasi lokal & rahasia (jangan pernah di-commit)
+local.properties
+*.jks
+*.keystore
+*.p12
+keystore.properties
+.env
+.env.*
+google-services.json
+
+# IDE
+.idea/
+*.iml
+.DS_Store
+captures/
+.externalNativeBuild/
+.cxx/
