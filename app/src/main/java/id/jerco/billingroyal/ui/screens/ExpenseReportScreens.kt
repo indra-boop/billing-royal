@@ -55,7 +55,8 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import id.jerco.billingroyal.core.AppDates
 import id.jerco.billingroyal.core.FeatureFlags
-import id.jerco.billingroyal.core.IdempotencyKeyHolder
+import id.jerco.billingroyal.data.repo.IdempotencyKind
+import id.jerco.billingroyal.data.repo.IdempotencyStore
 import id.jerco.billingroyal.core.MoneyFormatter
 import id.jerco.billingroyal.core.MoneyParser
 import id.jerco.billingroyal.data.remote.ApiResult
@@ -209,10 +210,10 @@ class ExpenseFormViewModel @Inject constructor(
     savedState: SavedStateHandle,
     private val repo: ExpenseRepository,
     val flags: FeatureFlags,
+    private val keyStore: IdempotencyStore,
 ) : ViewModel() {
     private val editId: Long? = (savedState.get<Long>("id") ?: -1L).takeIf { it >= 0 }
     val isEdit: Boolean get() = editId != null
-    private val keys = IdempotencyKeyHolder()
 
     private val _state = MutableStateFlow(ExpenseFormState(loading = editId != null))
     val state: StateFlow<ExpenseFormState> = _state
@@ -264,10 +265,10 @@ class ExpenseFormViewModel @Inject constructor(
         _state.update { it.copy(saving = true, error = null, uncertain = false) }
         viewModelScope.launch {
             val result = if (editId != null) repo.update(editId, input) // PUT seluruh field
-            else repo.create(keys.keyFor(input.toString()), input)
+            else repo.create(keyStore.keyFor(IdempotencyKind.EXPENSE_CREATE, input.toJson()), input)
             when (result) {
                 is ApiResult.Success -> {
-                    keys.reset()
+                    if (editId == null) keyStore.clear(IdempotencyKind.EXPENSE_CREATE)
                     _state.update { it.copy(saving = false, done = true) }
                 }
                 is ApiResult.Failure -> {

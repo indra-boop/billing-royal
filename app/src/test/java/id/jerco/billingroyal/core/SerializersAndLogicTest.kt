@@ -71,18 +71,6 @@ class SerializersAndLogicTest {
     }
 
     @Test
-    fun `idempotency key dipakai ulang untuk payload sama dan baru bila payload berubah`() {
-        val holder = IdempotencyKeyHolder()
-        val a = holder.keyFor("payload-1")
-        assertEquals(a, holder.keyFor("payload-1"))
-        val b = holder.keyFor("payload-2")
-        assertNotEquals(a, b)
-        holder.reset()
-        assertNotEquals(b, holder.keyFor("payload-2"))
-        assertTrue(Regex("^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$").matches(a))
-    }
-
-    @Test
     fun `aksi status dibalik feature flag`() {
         assertTrue(InvoiceActions.availableTargets("Draft", FeatureFlags()).isEmpty())
         assertTrue(InvoiceActions.availableTargets("Sent", FeatureFlags()).isEmpty())

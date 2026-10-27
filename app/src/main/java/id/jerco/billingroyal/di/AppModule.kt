@@ -16,6 +16,7 @@ import id.jerco.billingroyal.BuildConfig
 import id.jerco.billingroyal.core.FeatureFlags
 import id.jerco.billingroyal.data.local.AndroidKeystoreCipher
 import id.jerco.billingroyal.data.local.AppDatabase
+import id.jerco.billingroyal.data.local.PendingIdempotencyDao
 import id.jerco.billingroyal.data.local.CatalogDao
 import id.jerco.billingroyal.data.local.CustomerDao
 import id.jerco.billingroyal.data.local.DraftDao
@@ -60,7 +61,7 @@ object AppModule {
     fun database(@ApplicationContext context: Context): AppDatabase =
         Room.databaseBuilder(context, AppDatabase::class.java, AppDatabase.NAME)
             // v1 -> v2 dimigrasi tanpa membuang draft/Idempotency-Key. Hanya downgrade yang boleh mengosongkan.
-            .addMigrations(AppDatabase.MIGRATION_1_2)
+            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3)
             .fallbackToDestructiveMigrationOnDowngrade(dropAllTables = true)
             .build()
 
@@ -68,6 +69,7 @@ object AppModule {
     @Provides fun catalogDao(db: AppDatabase): CatalogDao = db.catalogDao()
     @Provides fun profileDao(db: AppDatabase): ProfileDao = db.profileDao()
     @Provides fun draftDao(db: AppDatabase): DraftDao = db.draftDao()
+    @Provides fun pendingIdempotencyDao(db: AppDatabase): PendingIdempotencyDao = db.pendingIdempotencyDao()
 
     @Provides
     @Singleton

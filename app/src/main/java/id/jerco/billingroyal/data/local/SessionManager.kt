@@ -1,8 +1,10 @@
 package id.jerco.billingroyal.data.local
 
+import id.jerco.billingroyal.core.SessionExpiry
 import id.jerco.billingroyal.data.remote.LoginData
 import id.jerco.billingroyal.data.remote.UserDto
 import id.jerco.billingroyal.data.repo.ScopeProvider
+import java.time.Instant
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
@@ -78,8 +80,16 @@ class SessionManager @Inject constructor(
         _notice.value = null
     }
 
-    suspend fun restore(): StoredSession? {
+    suspend fun restore(now: Instant = Instant.now()): StoredSession? {
         val stored = tokenStore.load()
+        if (stored != null && SessionExpiry.isExpired(stored.expiresAt, now)) {
+            // Token yang jelas sudah kedaluwarsa tidak dikirim ke server: hapus sesi + data lokal, lalu ke Login.
+            // Server tetap authoritative (nilai tak terbaca = dianggap belum kedaluwarsa).
+            _session.value = stored
+            clearAll()
+            _notice.value = SessionEvent.EXPIRED
+            return null
+        }
         _session.value = stored
         if (stored == null) {
             // Tidak ada sesi: sisa cache (mis. proses mati di tengah wipe) dibersihkan.

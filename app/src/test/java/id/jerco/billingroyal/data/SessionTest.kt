@@ -78,8 +78,8 @@ private class FakeProfileDao : ProfileDao {
     override suspend fun upsert(profile: ProfileEntity) { rows[profile.scope] = profile }
 }
 
-private fun loginData(token: String, userId: Long = 5, businessId: Long = 9) =
-    LoginData(token, "2026-12-31 00:00:00", UserDto(userId, "operator", "Operator Fiktif", "operator", BusinessRef(businessId, "Laundry Fiktif", "LF")))
+private fun loginData(token: String, userId: Long = 5, businessId: Long = 9, expiresAt: String? = "2026-12-31 00:00:00") =
+    LoginData(token, expiresAt, UserDto(userId, "operator", "Operator Fiktif", "operator", BusinessRef(businessId, "Laundry Fiktif", "LF")))
 
 class SessionManagerTest {
     private lateinit var dir: File
@@ -175,6 +175,32 @@ class SessionManagerTest {
         assertNull(m.currentToken(), "token tetap terhapus")
         assertEquals(1, failing.logoCleared, "langkah logo tetap jalan")
         assertTrue(cipher.keyDeleted >= 1)
+    }
+
+    @Test
+    fun `restore dengan expires_at lewat membersihkan sesi dan data lokal, notice EXPIRED, tanpa event paksa`() = runBlocking<Unit> {
+        manager.start(loginData("tok-EXP", expiresAt = "2026-10-01 00:00:00"))
+        val dbBefore = local.dbCleared
+
+        val restored = manager.restore(now = java.time.Instant.parse("2026-10-27T00:00:00Z"))
+
+        assertNull(restored)
+        assertNull(manager.currentToken())
+        assertNull(manager.session.value)
+        assertEquals(SessionEvent.EXPIRED, manager.notice.value)
+        assertTrue(local.dbCleared > dbBefore, "Room harus dibersihkan")
+        assertNull(tokenStore.load(), "token tersimpan harus terhapus")
+    }
+
+    @Test
+    fun `restore dengan expires_at masa depan atau tak terbaca tetap memulihkan sesi (server authoritative)`() = runBlocking<Unit> {
+        val now = java.time.Instant.parse("2026-10-27T00:00:00Z")
+        for (exp in listOf("2026-12-31 00:00:00", null, "bukan-tanggal", "")) {
+            manager.start(loginData("tok-OK", expiresAt = exp))
+            val restored = manager.restore(now = now)
+            assertNotNull(restored, "exp=$exp")
+            assertEquals("tok-OK", manager.currentToken(), "exp=$exp")
+        }
     }
 
     @Test

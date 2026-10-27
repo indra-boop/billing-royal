@@ -1,5 +1,8 @@
 package id.jerco.billingroyal.ui.screens
 
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.AlertDialog
 import androidx.compose.ui.semantics.Role
 import id.jerco.billingroyal.R
 import androidx.compose.ui.res.stringResource
@@ -288,19 +291,20 @@ fun InvoiceDetailScreen(onBack: () -> Unit, viewModel: InvoiceDetailViewModel = 
     val context = LocalContext.current
     val content = (state.load as? Load.Content)?.data
     SecureScreen()
-    var confirmShareDraft by remember { mutableStateOf<InvoiceDetailData?>(null) }
+    var shareRequest by remember { mutableStateOf<InvoiceDetailData?>(null) }
 
-    fun shareNow(data: InvoiceDetailData) {
+    fun shareNow(data: InvoiceDetailData, includeBank: Boolean) {
         val send = Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"
             putExtra(Intent.EXTRA_SUBJECT, "Invoice ${data.invoice.invoice_number}")
-            putExtra(Intent.EXTRA_TEXT, InvoiceShareText.build(data.invoice, data.profile))
+            putExtra(Intent.EXTRA_TEXT, InvoiceShareText.build(data.invoice, data.profile, includeBank))
         }
         context.startActivity(Intent.createChooser(send, "Bagikan invoice"))
     }
-    // Invoice Draft belum final dan Cancelled sudah dibatalkan: minta konfirmasi sebelum teksnya dikirim ke pihak lain.
+    // Bagikan selalu lewat dialog konfirmasi (data customer keluar dari aplikasi): peringatan untuk Draft/Dibatalkan dan
+    // pilihan "sertakan rekening pembayaran" bila profil punya rekening.
     fun requestShare(data: InvoiceDetailData) {
-        if (data.invoice.status == InvoiceStatus.DRAFT || data.invoice.status == InvoiceStatus.CANCELLED) confirmShareDraft = data else shareNow(data)
+        shareRequest = data
     }
 
     AppScaffold(
@@ -324,16 +328,11 @@ fun InvoiceDetailScreen(onBack: () -> Unit, viewModel: InvoiceDetailViewModel = 
         }
     }
 
-    confirmShareDraft?.let { data ->
-        ConfirmDialog(
-            title = if (data.invoice.status == InvoiceStatus.CANCELLED) "Bagikan invoice yang dibatalkan?" else "Bagikan invoice Draft?",
-            message = (
-                if (data.invoice.status == InvoiceStatus.CANCELLED) "Invoice ini berstatus Dibatalkan, sehingga tidak perlu dibayar. "
-                else "Invoice ini masih berstatus Draft (belum final). "
-                ) + "Teks yang dibagikan akan terkirim ke aplikasi pilihan Anda dan memuat data customer serta rekening pembayaran.",
-            confirmText = stringResource(R.string.tetap_bagikan),
-            onConfirm = { confirmShareDraft = null; shareNow(data) },
-            onDismiss = { confirmShareDraft = null },
+    shareRequest?.let { data ->
+        ShareInvoiceDialog(
+            data = data,
+            onShare = { includeBank -> shareRequest = null; shareNow(data, includeBank) },
+            onDismiss = { shareRequest = null },
         )
     }
 
@@ -414,4 +413,44 @@ private fun InvoiceDetailContent(
             OutlinedButton(onClick = { viewModel.askStatus(target) }, enabled = !state.updating, modifier = Modifier.fillMaxWidth()) { Text(label) }
         }
     }
+}
+
+/**
+ * Konfirmasi sebelum teks invoice dikirim ke aplikasi lain. Menampilkan peringatan untuk Draft/Dibatalkan dan, bila profil
+ * punya rekening, pilihan "Sertakan rekening pembayaran" (default aktif untuk invoice yang masih perlu dibayar).
+ */
+@Composable
+fun ShareInvoiceDialog(data: InvoiceDetailData, onShare: (includeBank: Boolean) -> Unit, onDismiss: () -> Unit) {
+    val status = data.invoice.status
+    val hasBank = !data.profile?.bankAccount.isNullOrBlank()
+    var includeBank by remember { mutableStateOf(status != InvoiceStatus.PAID && status != InvoiceStatus.CANCELLED) }
+    val warning = when (status) {
+        InvoiceStatus.DRAFT -> "Invoice ini masih berstatus Draft (belum final). "
+        InvoiceStatus.CANCELLED -> "Invoice ini berstatus Dibatalkan, sehingga tidak perlu dibayar. "
+        else -> ""
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Bagikan invoice?") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(warning + "Teks yang dibagikan terkirim ke aplikasi pilihan Anda dan memuat data customer dan rincian tagihan.")
+                if (hasBank) {
+                    Row(
+                        Modifier.fillMaxWidth().minTouch().toggleable(
+                            value = includeBank,
+                            role = Role.Checkbox,
+                            onValueChange = { includeBank = it },
+                        ),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Checkbox(checked = includeBank, onCheckedChange = null)
+                        Text("Sertakan rekening pembayaran", modifier = Modifier.padding(start = 8.dp))
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { onShare(hasBank && includeBank) }) { Text("Bagikan") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Batal") } },
+    )
 }

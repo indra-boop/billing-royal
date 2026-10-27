@@ -54,7 +54,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import id.jerco.billingroyal.core.FeatureFlags
-import id.jerco.billingroyal.core.IdempotencyKeyHolder
+import id.jerco.billingroyal.data.repo.IdempotencyKind
+import id.jerco.billingroyal.data.repo.IdempotencyStore
 import id.jerco.billingroyal.data.remote.ApiResult
 import id.jerco.billingroyal.data.remote.AppError
 import id.jerco.billingroyal.data.remote.displayMessage
@@ -305,11 +306,11 @@ class CustomerFormViewModel @Inject constructor(
     savedState: SavedStateHandle,
     private val repo: CustomerRepository,
     private val catalog: CatalogRepository,
+    private val keyStore: IdempotencyStore,
 ) : ViewModel() {
     private val editId: Long? = (savedState.get<Long>("id") ?: -1L).takeIf { it >= 0 }
     val isEdit: Boolean get() = editId != null
 
-    private val keys = IdempotencyKeyHolder()
     private val _state = MutableStateFlow(CustomerFormState(loading = editId != null))
     val state: StateFlow<CustomerFormState> = _state
 
@@ -374,11 +375,11 @@ class CustomerFormViewModel @Inject constructor(
             val result = if (editId != null) {
                 repo.update(editId, payload) // PUT dengan seluruh field
             } else {
-                repo.create(keys.keyFor(payload.toString()), payload)
+                repo.create(keyStore.keyFor(IdempotencyKind.CUSTOMER_CREATE, payload.toJson()), payload)
             }
             when (result) {
                 is ApiResult.Success -> {
-                    keys.reset()
+                    if (editId == null) keyStore.clear(IdempotencyKind.CUSTOMER_CREATE)
                     _state.update { it.copy(saving = false, done = true) }
                 }
                 is ApiResult.Failure -> _state.update {

@@ -108,7 +108,10 @@ object InvoiceShareText {
         }
     }
 
-    fun build(invoice: InvoiceDto, profile: ProfileEntity?): String = buildString {
+    /**
+     * @param includeBank false: nomor rekening/atas nama TIDAK ikut dibagikan (T16). Nama dan alamat bisnis tetap ada.
+     */
+    fun build(invoice: InvoiceDto, profile: ProfileEntity?, includeBank: Boolean = true): String = buildString {
         profile?.let { appendLine(it.name) }
         profile?.address?.takeIf { it.isNotBlank() }?.let { appendLine(it) }
         appendLine("INVOICE ${invoice.invoice_number}")
@@ -128,7 +131,7 @@ object InvoiceShareText {
         appendLine("Sisa: ${MoneyFormatter.format(invoice.balance)}")
         invoice.notes?.takeIf { it.isNotBlank() }?.let { appendLine("Catatan: $it") }
         val bank = profile
-        if (bank != null && !bank.bankAccount.isNullOrBlank()) {
+        if (includeBank && bank != null && !bank.bankAccount.isNullOrBlank()) {
             appendLine()
             appendLine("Pembayaran ke rekening:")
             append("${bank.bankName.orEmpty()} ${bank.bankAccount}")
