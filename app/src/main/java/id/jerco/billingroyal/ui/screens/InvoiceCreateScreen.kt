@@ -1,5 +1,23 @@
 package id.jerco.billingroyal.ui.screens
 
+import java.util.Locale
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import kotlinx.coroutines.delay
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
+import androidx.activity.compose.BackHandler
 import androidx.compose.ui.semantics.Role
 import id.jerco.billingroyal.ui.components.minTouch
 import id.jerco.billingroyal.R
@@ -104,13 +122,20 @@ private const val DRAFT_UNVERIFIED =
 
 private const val RESTORED_UNCERTAIN_MESSAGE =
     "Pengiriman invoice sebelumnya belum diketahui hasilnya (koneksi terputus, waktu habis, atau aplikasi sempat " +
-        "tertutup). Invoice mungkin SUDAH tersimpan di server. Periksa daftar invoice terlebih dahulu sebelum mengirim ulang."
+        "tertutup), jadi invoice mungkin sudah tersimpan. Periksa dulu agar tidak membuat invoice ganda."
+
+private const val SENT_UNCERTAIN_MESSAGE =
+    "Koneksi terputus saat invoice dikirim, jadi kami belum tahu hasilnya. Periksa dulu agar tidak membuat invoice ganda."
 
 data class UncertainUi(
     val message: String,
     val checking: Boolean = false,
     val matches: List<InvoiceDto>? = null,
     val checkError: String? = null,
+    /** Perkiraan subtotal draft saat dikirim: pembanding untuk mengenali invoice yang barusan dikirim. */
+    val estimate: BigDecimal? = null,
+    val customerName: String? = null,
+    val date: LocalDate? = null,
 )
 
 data class InvoiceFormUi(
@@ -340,6 +365,15 @@ class InvoiceCreateViewModel @Inject constructor(
         persist()
     }
 
+    /** Urungkan hapus item (Snackbar "Urungkan"): kembalikan item ke posisi semula bila service-nya belum ada lagi. */
+    fun restoreItem(index: Int, item: DraftItem) {
+        _ui.update {
+            if (it.items.any { i -> i.serviceId == item.serviceId }) it
+            else it.copy(items = it.items.toMutableList().also { l -> l.add(index.coerceIn(0, l.size), item) })
+        }
+        persist()
+    }
+
     private fun mutateItem(index: Int, f: (DraftItem) -> DraftItem) {
         _ui.update { s -> s.copy(items = s.items.mapIndexed { i, item -> if (i == index) f(item) else item }, error = null) }
         persist()
@@ -417,11 +451,7 @@ class InvoiceCreateViewModel @Inject constructor(
                         _ui.update {
                             it.copy(
                                 saving = false,
-                                uncertain = UncertainUi(
-                                    "Koneksi terputus atau waktu habis setelah invoice dikirim. Invoice mungkin sudah tersimpan " +
-                                        "di server. Periksa daftar invoice terlebih dahulu sebelum mengirim ulang.",
-                                    checking = true,
-                                ),
+                                uncertain = UncertainUi(SENT_UNCERTAIN_MESSAGE, checking = true),
                             )
                         }
                         checkExisting(submittedCustomer, submittedDate)
@@ -441,7 +471,13 @@ class InvoiceCreateViewModel @Inject constructor(
 
     /** Refresh daftar invoice (filter customer + tanggal hari ini) agar pengguna bisa memeriksa dulu. */
     fun checkExisting(customerId: Long? = _ui.value.customerId, date: LocalDate = _ui.value.date) {
-        _ui.update { s -> s.uncertain?.let { s.copy(uncertain = it.copy(checking = true, checkError = null)) } ?: s }
+        val now = _ui.value
+        val estimate = InvoicePreview.compute(now.items, now.prices, flags, pricesKnown = true).subtotal
+        _ui.update { s ->
+            s.uncertain?.let {
+                s.copy(uncertain = it.copy(checking = true, checkError = null, estimate = estimate, customerName = now.customerName, date = date))
+            } ?: s
+        }
         viewModelScope.launch {
             val today = AppDates.today()
             val result = invoices.list("", YearMonth.from(date), customerId, null, 1, 50)
@@ -486,10 +522,24 @@ fun InvoiceCreateScreen(
     var pickCustomer by remember { mutableStateOf(false) }
     var pickService by remember { mutableStateOf(false) }
     var confirmDiscard by remember { mutableStateOf(false) }
+    var confirmDiscardInvoice by remember { mutableStateOf<String?>(null) }
+    var confirmLeave by remember { mutableStateOf(false) }
+    var slowSave by remember { mutableStateOf(false) }
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    val itemRemovedText = stringResource(R.string.item_dihapus)
+    val undoText = stringResource(R.string.urungkan)
 
     LaunchedEffect(created) {
         created?.let { viewModel.consumeCreated(); onCreated(it) }
     }
+    // Koneksi lambat: setelah 8 detik menyimpan, beri tahu agar layar tidak ditutup (UX-09).
+    LaunchedEffect(ui.saving) {
+        slowSave = false
+        if (ui.saving) { delay(8_000); slowSave = true }
+    }
+    // Keluar saat request berjalan membuat hasil tidak pasti: minta konfirmasi dulu.
+    BackHandler(enabled = ui.saving) { confirmLeave = true }
 
     val flags = viewModel.flags
     // Harga dianggap diketahui hanya bila sudah selesai dimuat tanpa error (atau belum ada customer).
@@ -497,27 +547,64 @@ fun InvoiceCreateScreen(
     val preview = remember(ui.items, ui.prices, flags, pricesKnown) {
         InvoicePreview.compute(ui.items, ui.prices, flags, pricesKnown)
     }
+    val canSave = ui.customerId != null && ui.items.isNotEmpty()
 
-    AppScaffold(title = stringResource(R.string.buat_invoice), onBack = onBack) { padding ->
+    AppScaffold(
+        title = stringResource(R.string.buat_invoice),
+        onBack = { if (ui.saving) confirmLeave = true else onBack() },
+        snackbarHostState = snackbarHostState,
+        // Simpan tetap terlihat (satu tangan, UX-06): bilah bawah berisi perkiraan, galat, dan tombol Simpan.
+        bottomBar = {
+            if (!ui.restoring) {
+                Surface(tonalElevation = 3.dp, modifier = Modifier.imePadding()) {
+                    Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        ui.error?.let {
+                            Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive })
+                        }
+                        if (slowSave) {
+                            Text(
+                                stringResource(R.string.koneksi_lambat_tunggu),
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                            )
+                        }
+                        if (!canSave && !ui.saving) {
+                            Text(stringResource(R.string.simpan_syarat), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Text(
+                            stringResource(R.string.perkiraan_dan_jumlah_item, MoneyFormatter.format(preview.subtotal), ui.items.size),
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                        SavingButton(
+                            text = stringResource(R.string.simpan),
+                            saving = ui.saving,
+                            enabled = canSave,
+                            onClick = viewModel::save,
+                        )
+                    }
+                }
+            }
+        },
+    ) { padding ->
         if (ui.restoring) {
             Box(Modifier.padding(padding).fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
             return@AppScaffold
         }
         Column(
-            Modifier.padding(padding).fillMaxSize().imePadding().verticalScroll(rememberScrollState()).padding(16.dp),
+            Modifier.padding(padding).fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             OutlinedButton(
                 onClick = { viewModel.openCustomerPicker(); pickCustomer = true },
                 enabled = !ui.saving,
                 modifier = Modifier.fillMaxWidth().minTouch(),
-            ) { Text(ui.customerName?.let { "Customer: $it" } ?: "Pilih customer") }
+            ) { Text(ui.customerName?.let { stringResource(R.string.customer_dipilih, it) } ?: stringResource(R.string.pilih_customer)) }
 
             DateField(stringResource(R.string.tanggal), ui.date, viewModel::setDate, Modifier.fillMaxWidth(), enabled = !ui.saving)
 
-            ui.draftNotice?.let { WarningBox(it) }
+            ui.draftNotice?.let { WarningBox(it, Modifier.semantics { liveRegion = LiveRegionMode.Polite }) }
             if (ui.draftChecking) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                     Text(stringResource(R.string.mencocokkan_draft_dengan_data_terbaru), style = MaterialTheme.typography.bodySmall)
                 }
@@ -527,12 +614,20 @@ fun InvoiceCreateScreen(
             }
             ui.pricesError?.let { msg ->
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Harga tidak dapat dimuat: $msg", color = MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f))
+                    Text(
+                        stringResource(R.string.harga_tidak_dapat_dimuat, msg),
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Polite },
+                    )
                     TextButton(onClick = { viewModel.loadPrices() }) { Text(stringResource(R.string.coba_lagi)) }
                 }
             }
 
-            Text("Item (${ui.items.size}/${InvoiceRepository.MAX_ITEMS})", style = MaterialTheme.typography.titleMedium)
+            Text(
+                stringResource(R.string.item_hitung, ui.items.size, InvoiceRepository.MAX_ITEMS),
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.semantics { heading() },
+            )
             if (ui.items.isEmpty()) Text(stringResource(R.string.belum_ada_item), style = MaterialTheme.typography.bodyMedium)
             preview.lines.forEachIndexed { index, line ->
                 Card(Modifier.fillMaxWidth()) {
@@ -540,18 +635,29 @@ fun InvoiceCreateScreen(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 Text(line.item.name, style = MaterialTheme.typography.titleSmall)
-                                Text(
-                                    "Harga: " + when (line.state) {
-                                        InvoicePreview.PriceState.UNKNOWN -> "belum dimuat"
-                                        InvoicePreview.PriceState.NOT_IN_PRICE_LIST -> "tidak ada di price list (Rp 0)"
-                                        InvoicePreview.PriceState.ZERO_PRICE -> "Rp 0"
-                                        InvoicePreview.PriceState.OK -> MoneyFormatter.format(line.unitPrice)
-                                    } + (if (line.item.unit.isNotBlank() && line.state != InvoicePreview.PriceState.UNKNOWN) " / ${line.item.unit}" else ""),
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
+                                val priceText = when (line.state) {
+                                    InvoicePreview.PriceState.UNKNOWN -> stringResource(R.string.harga_belum_dimuat)
+                                    InvoicePreview.PriceState.NOT_IN_PRICE_LIST -> stringResource(R.string.harga_tidak_ada_di_price_list)
+                                    InvoicePreview.PriceState.ZERO_PRICE -> stringResource(R.string.harga_nol)
+                                    InvoicePreview.PriceState.OK -> MoneyFormatter.format(line.unitPrice)
+                                }
+                                val unitText = if (line.item.unit.isNotBlank() && line.state != InvoicePreview.PriceState.UNKNOWN) " / ${line.item.unit}" else ""
+                                Text(stringResource(R.string.harga_label, priceText + unitText), style = MaterialTheme.typography.bodySmall)
                             }
-                            IconButton(onClick = { viewModel.removeItem(index) }, enabled = !ui.saving) {
-                                Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.hapus_item))
+                            val removeLabel = stringResource(R.string.hapus_item_nama, line.item.name)
+                            IconButton(
+                                onClick = {
+                                    val removed = line.item
+                                    viewModel.removeItem(index)
+                                    scope.launch {
+                                        snackbarHostState.currentSnackbarData?.dismiss()
+                                        val r = snackbarHostState.showSnackbar(itemRemovedText, actionLabel = undoText, duration = SnackbarDuration.Long)
+                                        if (r == SnackbarResult.ActionPerformed) viewModel.restoreItem(index, removed)
+                                    }
+                                },
+                                enabled = !ui.saving,
+                            ) {
+                                Icon(Icons.Default.Delete, contentDescription = removeLabel)
                             }
                         }
                         OutlinedTextField(
@@ -561,7 +667,7 @@ fun InvoiceCreateScreen(
                             singleLine = true,
                             isError = line.qty == null,
                             supportingText = { if (line.qty == null) Text(stringResource(R.string.lebih_dari_0_maksimal_2)) },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = if (flags.priceOverride) ImeAction.Next else ImeAction.Done),
                             modifier = Modifier.fillMaxWidth(),
                         )
                         if (flags.priceOverride) {
@@ -576,14 +682,14 @@ fun InvoiceCreateScreen(
                                     when {
                                         line.item.overridePriceText.isBlank() -> Unit
                                         parsed == null -> Text(stringResource(R.string.nominal_tidak_valid_contoh_15000))
-                                        else -> Text(stringResource(R.string.dibaca_sebagai) + MoneyFormatter.format(parsed))
+                                        else -> Text(stringResource(R.string.dibaca_sebagai_nilai, MoneyFormatter.format(parsed)))
                                     }
                                 },
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
                                 modifier = Modifier.fillMaxWidth(),
                             )
                         }
-                        Text(stringResource(R.string.perkiraan_jumlah_belum_final) + MoneyFormatter.format(line.amount), style = MaterialTheme.typography.bodySmall)
+                        Text(stringResource(R.string.perkiraan_jumlah_nilai, MoneyFormatter.format(line.amount)), style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }
@@ -594,7 +700,7 @@ fun InvoiceCreateScreen(
             ) { Text(stringResource(R.string.tambah_item_dari_katalog)) }
             ui.itemNotice?.let { msg ->
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(msg, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                    Text(msg, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Polite })
                     TextButton(onClick = viewModel::dismissItemNotice) { Text(stringResource(R.string.tutup)) }
                 }
             }
@@ -602,10 +708,7 @@ fun InvoiceCreateScreen(
             // Hanya bila harga sudah diketahui: jangan menyalahkan "tanpa harga" saat harga masih dimuat/gagal dimuat
             // (penyebab sebenarnya sudah ditampilkan sebagai galat di atas).
             if (ui.items.isNotEmpty() && pricesKnown && preview.problemCount > 0) {
-                WarningBox(
-                    "${preview.problemCount} item berharga Rp 0 atau tidak ada di price list customer. " +
-                        "Nilai ini dikirim apa adanya; periksa sebelum menyimpan.",
-                )
+                WarningBox(stringResource(R.string.peringatan_harga_nol, preview.problemCount))
             }
 
             OutlinedTextField(
@@ -613,36 +716,30 @@ fun InvoiceCreateScreen(
                 onValueChange = viewModel::setNotes,
                 label = { Text(stringResource(R.string.catatan)) },
                 minLines = 2,
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                 modifier = Modifier.fillMaxWidth(),
             )
 
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(12.dp)) {
-                    Text(stringResource(R.string.perkiraan_subtotal_preview), style = MaterialTheme.typography.labelMedium)
+                    Text(stringResource(R.string.perkiraan_subtotal_preview), style = MaterialTheme.typography.labelMedium, modifier = Modifier.semantics { heading() })
                     Text(MoneyFormatter.format(preview.subtotal), style = MaterialTheme.typography.titleLarge)
-                    Text(
-                        "Hanya perkiraan: server yang menentukan subtotal dan total final (termasuk pembulatan).",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
+                    Text(stringResource(R.string.hanya_perkiraan_server_menentukan), style = MaterialTheme.typography.bodySmall)
                     if (ui.draftChecking || ui.pricesLoading || ui.pricesError != null || ui.draftNotice == DRAFT_UNVERIFIED) {
+                        // Peringatan (bukan galat): bukan warna error agar galat sungguhan tetap menonjol.
                         Text(
-                            "Harga belum final atau mungkin tidak terbaru; angka di atas bisa berubah.",
+                            stringResource(R.string.harga_belum_final),
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
+                            fontWeight = FontWeight.SemiBold,
                         )
                     }
                 }
             }
 
             Text(stringResource(R.string.invoice_baru_selalu_disimpan_dengan), style = MaterialTheme.typography.bodySmall)
-            ui.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            SavingButton(
-                text = stringResource(R.string.simpan),
-                saving = ui.saving,
-                enabled = ui.customerId != null && ui.items.isNotEmpty(),
-                onClick = viewModel::save,
-            )
-            TextButton(onClick = { confirmDiscard = true }, enabled = !ui.saving) { Text(stringResource(R.string.kosongkan_draft)) }
+            TextButton(onClick = { confirmDiscard = true }, enabled = !ui.saving, modifier = Modifier.minTouch()) {
+                Text(stringResource(R.string.hapus_draft), color = MaterialTheme.colorScheme.error)
+            }
         }
     }
 
@@ -659,10 +756,12 @@ fun InvoiceCreateScreen(
             onRetry = { viewModel.searchCustomers("") },
             onPick = { viewModel.selectCustomer(it); pickCustomer = false },
             onDismiss = { pickCustomer = false },
+            footer = stringResource(R.string.picker_customer_terbatas),
         )
     }
     if (pickService) {
         val services by viewModel.services.collectAsStateWithLifecycle()
+        val noPrice = stringResource(R.string.harga_tidak_ada_singkat)
         SearchPickerDialog(
             title = stringResource(R.string.pilih_item),
             state = services,
@@ -670,7 +769,7 @@ fun InvoiceCreateScreen(
             serverSearch = false,
             label = { it.name },
             sub = { s ->
-                val price = ui.prices[s.id]?.let { MoneyFormatter.format(it) } ?: if (ui.customerId != null) "harga tidak ada" else null
+                val price = ui.prices[s.id]?.let { MoneyFormatter.format(it) } ?: if (ui.customerId != null) noPrice else null
                 listOfNotNull(s.category.takeIf { it.isNotBlank() }, price).joinToString("  |  ").ifBlank { null }
             },
             matches = { s, q -> s.name.contains(q, true) || s.category.contains(q, true) || (s.item_code?.contains(q, true) == true) },
@@ -681,47 +780,88 @@ fun InvoiceCreateScreen(
     }
     if (confirmDiscard) {
         ConfirmDialog(
-            title = stringResource(R.string.kosongkan_draft),
+            title = stringResource(R.string.hapus_draft_tanya),
             message = stringResource(R.string.draft_invoice_lokal_akan_dihapus),
-            confirmText = stringResource(R.string.kosongkan),
+            confirmText = stringResource(R.string.hapus_draft),
             onConfirm = { confirmDiscard = false; viewModel.discardDraft() },
             onDismiss = { confirmDiscard = false },
+            destructive = true,
+        )
+    }
+    if (confirmLeave) {
+        ConfirmDialog(
+            title = stringResource(R.string.keluar_saat_menyimpan_judul),
+            message = stringResource(R.string.keluar_saat_menyimpan_pesan),
+            confirmText = stringResource(R.string.tetap_keluar),
+            onConfirm = { confirmLeave = false; onBack() },
+            onDismiss = { confirmLeave = false },
+            destructive = true,
+        )
+    }
+    confirmDiscardInvoice?.let { number ->
+        ConfirmDialog(
+            title = stringResource(R.string.hapus_draft_tanya),
+            message = stringResource(R.string.hapus_draft_pastikan, number),
+            confirmText = stringResource(R.string.hapus_draft),
+            onConfirm = { confirmDiscardInvoice = null; viewModel.dismissUncertain(); viewModel.discardDraft() },
+            onDismiss = { confirmDiscardInvoice = null },
+            destructive = true,
         )
     }
     ui.uncertain?.let { u ->
         UncertainDialog(
             message = u.message,
+            title = stringResource(R.string.invoice_mungkin_sudah_tersimpan),
+            checkLabel = stringResource(R.string.periksa_invoice),
+            resendTitle = stringResource(R.string.kirim_ulang_invoice_tanya),
+            dismissHint = stringResource(R.string.draft_tetap_tersimpan),
             onCheck = { viewModel.dismissUncertain(); onCheckList() },
             onResend = viewModel::confirmResend,
-            resendWarning = "Invoice mungkin sudah tersimpan di server. Mengirim ulang dapat membuat invoice GANDA. " +
-                "Lanjutkan hanya bila Anda sudah memeriksa daftar invoice dan invoice ini belum ada.",
+            resendWarning = stringResource(R.string.peringatan_kirim_ulang_invoice),
             onDismiss = viewModel::dismissUncertain,
             extra = {
                 when {
-                    u.checking -> Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(Modifier.height(18.dp), strokeWidth = 2.dp)
-                        Text(stringResource(R.string.memeriksa_daftar_invoice))
+                    u.checking -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                        Text(stringResource(R.string.memeriksa_daftar_invoice), modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
                     }
-                    u.checkError != null -> Column {
+                    u.checkError != null -> Column(Modifier.semantics { liveRegion = LiveRegionMode.Polite }) {
                         Text(u.checkError, color = MaterialTheme.colorScheme.error)
                         TextButton(onClick = { viewModel.checkExisting() }) { Text(stringResource(R.string.periksa_lagi)) }
                     }
-                    u.matches != null -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    u.matches != null -> Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }) {
+                        val who = u.customerName ?: "-"
+                        val whenText = u.date?.let { AppDates.display(it) } ?: "-"
                         if (u.matches.isEmpty()) {
-                            Text(stringResource(R.string.tidak_ada_invoice_customer_ini))
+                            Text(stringResource(R.string.belum_ada_invoice_untuk, who, whenText))
+                            // Pencarian hanya mencakup 50 invoice terbaru bulan itu: hasil kosong belum tentu pasti.
+                            Text(stringResource(R.string.pencarian_terbatas_50), style = MaterialTheme.typography.bodySmall)
                         } else {
-                            Text(stringResource(R.string.invoice_customer_ini_hari_inipada))
-                            Text(
-                                "Bila salah satunya adalah invoice yang barusan Anda simpan, hapus draft ini agar tidak terkirim dua kali.",
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                            TextButton(onClick = { viewModel.dismissUncertain(); viewModel.discardDraft() }) {
-                                Text(stringResource(R.string.invoice_sudah_ada_hapus_draft))
-                            }
+                            Text(stringResource(R.string.ada_invoice_untuk, u.matches.size, who, whenText))
+                            Text(stringResource(R.string.pencarian_terbatas_50), style = MaterialTheme.typography.bodySmall)
                             u.matches.take(5).forEach { inv ->
-                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Text("${inv.invoice_number} - ${MoneyFormatter.format(inv.subtotal)}", Modifier.weight(1f))
-                                    StatusBadge(inv.status)
+                                val sameAsEstimate = u.estimate != null && inv.subtotal.compareTo(u.estimate) == 0
+                                Card(Modifier.fillMaxWidth()) {
+                                    Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            Text(inv.invoice_number, Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+                                            StatusBadge(inv.status)
+                                        }
+                                        val time = AppDates.parseServerDateTime(inv.created_at)?.let { String.format(Locale.ROOT, "%02d.%02d", it.hour, it.minute) }
+                                        Text(
+                                            listOfNotNull(
+                                                time?.let { stringResource(R.string.dibuat_jam, it) },
+                                                MoneyFormatter.format(inv.subtotal),
+                                            ).joinToString(" · "),
+                                            style = MaterialTheme.typography.bodySmall,
+                                        )
+                                        if (sameAsEstimate) {
+                                            Text(stringResource(R.string.kemungkinan_besar_ini), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                                        }
+                                        TextButton(onClick = { confirmDiscardInvoice = inv.invoice_number }, modifier = Modifier.minTouch()) {
+                                            Text(stringResource(R.string.ini_invoicenya_hapus_draft))
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -732,7 +872,10 @@ fun InvoiceCreateScreen(
     }
 }
 
-/** Dialog pilih-dengan-pencarian. Bila [serverSearch] maka [onQuery] memicu pencarian di server; selain itu difilter lokal. */
+/**
+ * Dialog pilih-dengan-pencarian. Bila [serverSearch] maka [onQuery] memicu pencarian di server; selain itu difilter lokal.
+ * [footer] = catatan kecil di bawah daftar (mis. daftar terpotong).
+ */
 @Composable
 fun <T> SearchPickerDialog(
     title: String,
@@ -745,8 +888,11 @@ fun <T> SearchPickerDialog(
     onRetry: () -> Unit,
     onPick: (T) -> Unit,
     onDismiss: () -> Unit,
+    footer: String? = null,
 ) {
     var query by remember { mutableStateOf("") }
+    val focusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) { focusRequester.requestFocus() }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
@@ -757,14 +903,20 @@ fun <T> SearchPickerDialog(
                     onValueChange = { query = it; if (serverSearch) onQuery(it) },
                     label = { Text(stringResource(R.string.cari)) },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    trailingIcon = {
+                        if (query.isNotEmpty()) {
+                            TextButton(onClick = { query = ""; if (serverSearch) onQuery("") }) { Text(stringResource(R.string.hapus_teks)) }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
                 )
                 Spacer(Modifier.height(8.dp))
                 Box(Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 360.dp)) {
                     when (state) {
                         Load.Loading -> CircularProgressIndicator(Modifier.align(Alignment.Center))
                         is Load.Error -> Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(state.message, color = MaterialTheme.colorScheme.error)
+                            Text(state.message, color = MaterialTheme.colorScheme.error, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
                             TextButton(onClick = onRetry) { Text(stringResource(R.string.coba_lagi)) }
                         }
                         is Load.Content -> {
@@ -774,11 +926,18 @@ fun <T> SearchPickerDialog(
                             } else {
                                 LazyColumn {
                                     items(shown) { item ->
-                                        Column(Modifier.fillMaxWidth().clickable(role = Role.Button) { onPick(item) }.padding(vertical = 10.dp)) {
+                                        // Tinggi minimum 48dp untuk target sentuh (UI-06).
+                                        Column(
+                                            Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Button) { onPick(item) }.padding(vertical = 10.dp),
+                                            verticalArrangement = Arrangement.Center,
+                                        ) {
                                             Text(label(item), style = MaterialTheme.typography.bodyLarge)
                                             sub(item)?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                                         }
                                         HorizontalDivider()
+                                    }
+                                    if (footer != null && query.isBlank()) {
+                                        item { Text(footer, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 8.dp)) }
                                     }
                                 }
                             }

@@ -1,5 +1,21 @@
 package id.jerco.billingroyal.ui.screens
 
+import id.jerco.billingroyal.ui.components.ConfirmDialog
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Surface
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.semantics.contentType
+import androidx.compose.ui.autofill.ContentType
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import id.jerco.billingroyal.R
 import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.layout.size
@@ -44,6 +60,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import id.jerco.billingroyal.data.local.SessionEvent
 import id.jerco.billingroyal.data.local.SessionManager
 import id.jerco.billingroyal.data.remote.ApiResult
+import id.jerco.billingroyal.data.remote.AppError
 import id.jerco.billingroyal.data.remote.requiresRelogin
 import id.jerco.billingroyal.data.repo.AuthRepository
 import id.jerco.billingroyal.ui.components.InfoBanner
@@ -102,6 +119,7 @@ class SplashViewModel @Inject constructor(
 @Composable
 fun SplashScreen(onHome: () -> Unit, onLogin: () -> Unit, viewModel: SplashViewModel = hiltViewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    var confirmWipe by remember { mutableStateOf(false) }
     LaunchedEffect(state) {
         when (state) {
             SplashState.GoHome -> onHome()
@@ -121,20 +139,43 @@ fun SplashScreen(onHome: () -> Unit, onLogin: () -> Unit, viewModel: SplashViewM
         Spacer(Modifier.height(24.dp))
         when (val s = state) {
             is SplashState.Error -> {
-                Text(s.message, color = MaterialTheme.colorScheme.error)
+                Text(s.message, color = MaterialTheme.colorScheme.error, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
                 Spacer(Modifier.height(12.dp))
-                Button(onClick = viewModel::check) { Text(stringResource(R.string.coba_lagi)) }
+                Button(onClick = viewModel::check, modifier = Modifier.minTouch()) { Text(stringResource(R.string.coba_lagi)) }
                 Spacer(Modifier.height(8.dp))
-                OutlinedButton(onClick = viewModel::forceLogin) { Text(stringResource(R.string.masuk_ulang)) }
+                // Menghapus data perangkat (termasuk draft invoice): selalu minta konfirmasi, bukan sekadar "masuk ulang".
+                OutlinedButton(onClick = { confirmWipe = true }, modifier = Modifier.minTouch()) {
+                    Text(stringResource(R.string.keluar_dan_hapus_data))
+                }
+                if (confirmWipe) {
+                    ConfirmDialog(
+                        title = stringResource(R.string.keluar_dan_hapus_data),
+                        message = stringResource(R.string.keluar_dan_hapus_data_pesan),
+                        confirmText = stringResource(R.string.ya_hapus_dan_keluar),
+                        onConfirm = { confirmWipe = false; viewModel.forceLogin() },
+                        onDismiss = { confirmWipe = false },
+                        destructive = true,
+                    )
+                }
             }
-            else -> CircularProgressIndicator()
+            else -> {
+                CircularProgressIndicator()
+                Spacer(Modifier.height(12.dp))
+                Text(stringResource(R.string.memeriksa_sesi), modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+            }
         }
     }
 }
 
 // ------------------------------------------------------------------ Login
 
-data class LoginState(val loading: Boolean = false, val error: String? = null, val success: Boolean = false)
+data class LoginState(
+    val loading: Boolean = false,
+    val error: String? = null,
+    /** Pesan dari strings.xml (validasi/terjemahan kode galat); didahulukan atas [error]. */
+    @androidx.annotation.StringRes val errorRes: Int? = null,
+    val success: Boolean = false,
+)
 
 @HiltViewModel
 class LoginViewModel @Inject constructor(
@@ -153,7 +194,7 @@ class LoginViewModel @Inject constructor(
     fun login(username: String, password: String) {
         if (_state.value.loading) return
         if (username.isBlank() || password.isEmpty()) {
-            _state.value = LoginState(error = "Username dan password wajib diisi.")
+            _state.value = LoginState(errorRes = R.string.login_wajib_diisi)
             return
         }
         _state.value = LoginState(loading = true)
@@ -161,8 +202,15 @@ class LoginViewModel @Inject constructor(
             // device_name otomatis = Build.MODEL
             _state.value = when (val result = auth.login(username, password, Build.MODEL ?: "Android")) {
                 is ApiResult.Success -> LoginState(success = true)
-                // 401 invalid_credentials, 403, 429, 503: tampilkan pesan server apa adanya.
-                is ApiResult.Failure -> LoginState(error = result.error.message)
+                // invalid_credentials dan 429 diterjemahkan di klien; galat lain (403, 503, ...) memakai pesan server apa adanya.
+                is ApiResult.Failure -> {
+                    val e = result.error
+                    when {
+                        e is AppError.Api && e.code == "invalid_credentials" -> LoginState(errorRes = R.string.login_salah)
+                        e is AppError.Api && e.status == 429 -> LoginState(errorRes = R.string.login_terlalu_banyak)
+                        else -> LoginState(error = e.message)
+                    }
+                }
             }
         }
     }
@@ -175,6 +223,7 @@ fun LoginScreen(onLoggedIn: () -> Unit, viewModel: LoginViewModel = hiltViewMode
     SecureScreen()
     var username by rememberSaveable { mutableStateOf("") } // password sengaja TIDAK disimpan ke state instance
     var password by remember { mutableStateOf("") }
+    var showPassword by remember { mutableStateOf(false) } // tidak disimpan; kembali tersembunyi saat layar dibuat ulang
 
     LaunchedEffect(state.success) { if (state.success) onLoggedIn() }
 
@@ -192,7 +241,7 @@ fun LoginScreen(onLoggedIn: () -> Unit, viewModel: LoginViewModel = hiltViewMode
         Text(stringResource(R.string.masuk_sebagai_operator), style = MaterialTheme.typography.bodyMedium)
         notice?.let {
             Spacer(Modifier.height(16.dp))
-            InfoBanner(sessionNoticeText(it))
+            SessionNoticeCard(it, onDismiss = viewModel::dismissNotice)
         }
         Spacer(Modifier.height(24.dp))
         OutlinedTextField(
@@ -201,7 +250,8 @@ fun LoginScreen(onLoggedIn: () -> Unit, viewModel: LoginViewModel = hiltViewMode
             label = { Text(stringResource(R.string.username)) },
             singleLine = true,
             enabled = !state.loading,
-            modifier = Modifier.fillMaxWidth(),
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next, autoCorrectEnabled = false),
+            modifier = Modifier.fillMaxWidth().semantics { contentType = ContentType.Username },
         )
         Spacer(Modifier.height(12.dp))
         OutlinedTextField(
@@ -210,13 +260,25 @@ fun LoginScreen(onLoggedIn: () -> Unit, viewModel: LoginViewModel = hiltViewMode
             label = { Text(stringResource(R.string.password)) },
             singleLine = true,
             enabled = !state.loading,
-            visualTransformation = PasswordVisualTransformation(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-            modifier = Modifier.fillMaxWidth(),
+            visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = { viewModel.login(username, password) }),
+            trailingIcon = {
+                // Teks (bukan ikon): material-icons-extended tidak dipakai agar dependency tidak bertambah.
+                TextButton(onClick = { showPassword = !showPassword }) {
+                    Text(stringResource(if (showPassword) R.string.sembunyikan_password_pendek else R.string.tampilkan_password_pendek))
+                }
+            },
+            modifier = Modifier.fillMaxWidth().semantics { contentType = ContentType.Password },
         )
-        state.error?.let {
+        val errorText = state.errorRes?.let { stringResource(it) } ?: state.error
+        errorText?.let {
             Spacer(Modifier.height(12.dp))
-            Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.fillMaxWidth())
+            Text(
+                it,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Assertive },
+            )
         }
         Spacer(Modifier.height(20.dp))
         Button(
@@ -224,16 +286,38 @@ fun LoginScreen(onLoggedIn: () -> Unit, viewModel: LoginViewModel = hiltViewMode
             enabled = !state.loading,
             modifier = Modifier.fillMaxWidth().minTouch(),
         ) {
-            if (state.loading) CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp) else Text(stringResource(R.string.masuk))
+            if (state.loading) {
+                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = LocalContentColor.current)
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.masuk_loading))
+            } else {
+                Text(stringResource(R.string.masuk))
+            }
         }
     }
 }
 
-/** Teks yang ditampilkan di Login saat sesi diakhiri oleh server (A-01). */
-fun sessionNoticeText(event: SessionEvent): String = when (event) {
-    SessionEvent.EXPIRED ->
-        "Sesi Anda berakhir. Silakan masuk lagi. Data lokal, termasuk draft invoice yang belum disimpan, " +
-            "sudah dihapus. Bila Anda sedang menyimpan invoice, periksa daftar invoice sebelum membuat ulang."
-    SessionEvent.ACCOUNT_INACTIVE ->
-        "Akun Anda dinonaktifkan. Hubungi admin laundry. Data lokal di perangkat ini sudah dihapus."
+/**
+ * Pemberitahuan di Login saat sesi diakhiri server (UX-02): judul tebal, satu kalimat, butir petunjuk, bisa ditutup,
+ * dan diumumkan ke pembaca layar. Penghapusan data lokal tetap sesuai aturan; ini hanya memperjelas komunikasinya.
+ */
+@Composable
+fun SessionNoticeCard(event: SessionEvent, onDismiss: () -> Unit) {
+    val (title, body, hint) = when (event) {
+        SessionEvent.EXPIRED -> Triple(R.string.notice_expired_title, R.string.notice_expired_body, R.string.notice_expired_hint)
+        SessionEvent.ACCOUNT_INACTIVE -> Triple(R.string.notice_inactive_title, R.string.notice_inactive_body, null)
+    }
+    Surface(
+        modifier = Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite },
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+    ) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(stringResource(title), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, modifier = Modifier.semantics { heading() })
+            Text(stringResource(body), style = MaterialTheme.typography.bodyMedium)
+            if (hint != null) Text("• " + stringResource(hint), style = MaterialTheme.typography.bodyMedium)
+            TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.End).minTouch()) { Text(stringResource(R.string.mengerti)) }
+        }
+    }
 }

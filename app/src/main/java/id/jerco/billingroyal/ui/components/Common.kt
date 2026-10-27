@@ -1,5 +1,12 @@
 package id.jerco.billingroyal.ui.components
 
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.res.stringResource
 import id.jerco.billingroyal.R
 import androidx.compose.ui.unit.Dp
@@ -70,6 +77,7 @@ fun AppScaffold(
     snackbarHostState: SnackbarHostState? = null,
     actions: @Composable () -> Unit = {},
     floatingActionButton: @Composable () -> Unit = {},
+    bottomBar: @Composable () -> Unit = {},
     content: @Composable (PaddingValues) -> Unit,
 ) {
     Scaffold(
@@ -88,6 +96,7 @@ fun AppScaffold(
         },
         snackbarHost = { snackbarHostState?.let { SnackbarHost(it) } },
         floatingActionButton = floatingActionButton,
+        bottomBar = bottomBar,
         content = content,
     )
 }
@@ -104,28 +113,52 @@ fun <T> LoadStateView(
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
     isEmpty: (T) -> Boolean = { false },
-    emptyMessage: String = "Belum ada data.",
+    emptyMessage: String = stringResource(R.string.belum_ada_data),
+    /** Tombol ajakan (CTA) di bawah teks kosong, mis. "Tambah customer". */
+    emptyAction: (@Composable () -> Unit)? = null,
+    /** True bila data yang tampil berasal dari cache (offline): banner konsisten di semua layar berdaftar. */
+    fromCache: Boolean = false,
     content: @Composable (T) -> Unit,
 ) {
-    PullToRefreshBox(isRefreshing = refreshing, onRefresh = onRefresh, modifier = modifier.fillMaxSize()) {
-        when (state) {
-            Load.Loading -> CenteredScroll {
-                CircularProgressIndicator()
-                Spacer(Modifier.height(12.dp))
-                Text(stringResource(R.string.memuat))
-            }
-            is Load.Error -> CenteredScroll {
-                Text(state.message, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.error)
-                Spacer(Modifier.height(12.dp))
-                Button(onClick = onRetry) { Text(stringResource(R.string.coba_lagi)) }
-            }
-            is Load.Content -> if (isEmpty(state.data)) {
-                CenteredScroll { Text(emptyMessage, style = MaterialTheme.typography.bodyLarge) }
-            } else {
-                content(state.data)
+    Column(modifier.fillMaxSize()) {
+        if (fromCache && state is Load.Content) OfflineBanner()
+        PullToRefreshBox(isRefreshing = refreshing, onRefresh = onRefresh, modifier = Modifier.fillMaxSize()) {
+            when (state) {
+                Load.Loading -> CenteredScroll {
+                    CircularProgressIndicator()
+                    Spacer(Modifier.height(12.dp))
+                    Text(stringResource(R.string.memuat), modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+                }
+                is Load.Error -> CenteredScroll {
+                    Text(
+                        state.message,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Button(onClick = onRetry, modifier = Modifier.minTouch()) { Text(stringResource(R.string.coba_lagi)) }
+                }
+                is Load.Content -> if (isEmpty(state.data)) {
+                    CenteredScroll {
+                        Text(emptyMessage, style = MaterialTheme.typography.bodyLarge)
+                        if (emptyAction != null) {
+                            Spacer(Modifier.height(12.dp))
+                            emptyAction()
+                        }
+                    }
+                } else {
+                    content(state.data)
+                }
             }
         }
     }
+}
+
+/** Banner offline yang sama di semua layar yang melayani data cache; diumumkan ke pembaca layar saat muncul. */
+@Composable
+fun OfflineBanner(modifier: Modifier = Modifier) {
+    InfoBanner(stringResource(R.string.tidak_ada_koneksi_menampilkan_data), modifier.semantics { liveRegion = LiveRegionMode.Polite })
 }
 
 @Composable
@@ -183,20 +216,27 @@ fun ConfirmDialog(
     confirmText: String,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
+    /** Aksi merusak (hapus/keluar): tombol konfirmasi berwarna error agar tidak tertukar dengan konfirmasi biasa. */
+    destructive: Boolean = false,
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = { Text(message) },
-        confirmButton = { TextButton(onClick = onConfirm) { Text(confirmText) } },
+        confirmButton = {
+            TextButton(
+                onClick = onConfirm,
+                colors = if (destructive) ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error) else ButtonDefaults.textButtonColors(),
+            ) { Text(confirmText) }
+        },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.batal)) } },
     )
 }
 
 /**
  * Dialog hasil tidak pasti setelah timeout/network error pada request tulis. Tidak ada auto-retry.
- * Aksi utama (tombol terisi) adalah "Periksa daftar". "Kirim ulang" butuh konfirmasi kedua yang
- * menjelaskan risiko data ganda.
+ * Aksi utama (tombol terisi) adalah "Periksa ...". "Kirim ulang" butuh konfirmasi kedua yang
+ * menjelaskan risiko data ganda; pada konfirmasi itu "Batal" adalah tombol terisi (pilihan aman).
  */
 @Composable
 fun UncertainDialog(
@@ -204,15 +244,19 @@ fun UncertainDialog(
     onCheck: () -> Unit,
     onResend: () -> Unit,
     onDismiss: () -> Unit,
-    resendWarning: String = "Data mungkin sudah tersimpan di server. Mengirim ulang dapat membuat data GANDA. " +
-        "Lanjutkan hanya bila Anda sudah memeriksa daftar dan data ini belum ada.",
+    title: String = stringResource(R.string.data_mungkin_sudah_tersimpan),
+    checkLabel: String = stringResource(R.string.periksa_daftar),
+    resendTitle: String = stringResource(R.string.kirim_ulang),
+    /** Penjelasan kecil di bawah isi tentang apa yang terjadi bila dialog ditutup ("Nanti"). */
+    dismissHint: String? = null,
+    resendWarning: String = stringResource(R.string.peringatan_kirim_ulang_umum),
     extra: @Composable () -> Unit = {},
 ) {
     var confirmResend by remember { mutableStateOf(false) }
     if (confirmResend) {
         AlertDialog(
             onDismissRequest = { confirmResend = false },
-            title = { Text(stringResource(R.string.kirim_ulang)) },
+            title = { Text(resendTitle) },
             text = { Text(resendWarning) },
             confirmButton = { TextButton(onClick = { confirmResend = false; onResend() }) { Text(stringResource(R.string.ya_kirim_ulang)) } },
             dismissButton = { Button(onClick = { confirmResend = false }) { Text(stringResource(R.string.batal)) } },
@@ -221,18 +265,21 @@ fun UncertainDialog(
     }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.status_penyimpanan_belum_pasti)) },
+        title = { Text(title) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.verticalScroll(rememberScrollState())) {
                 Text(message)
                 extra()
+                if (dismissHint != null) {
+                    Text(dismissHint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
         },
-        confirmButton = { Button(onClick = onCheck) { Text(stringResource(R.string.periksa_daftar)) } },
+        confirmButton = { Button(onClick = onCheck, modifier = Modifier.minTouch()) { Text(checkLabel) } },
         dismissButton = {
             Row {
-                TextButton(onClick = { confirmResend = true }) { Text(stringResource(R.string.kirim_ulang_2)) }
-                TextButton(onClick = onDismiss) { Text(stringResource(R.string.tutup)) }
+                TextButton(onClick = { confirmResend = true }) { Text(stringResource(R.string.kirim_ulang_dots)) }
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.nanti)) }
             }
         },
     )
@@ -248,7 +295,7 @@ fun DateField(
     enabled: Boolean = true,
 ) {
     var open by remember { mutableStateOf(false) }
-    OutlinedButton(onClick = { open = true }, modifier = modifier, enabled = enabled) {
+    OutlinedButton(onClick = { open = true }, modifier = modifier.minTouch(), enabled = enabled) {
         Text("$label: ${AppDates.display(date)}")
     }
     if (open) {
@@ -276,12 +323,20 @@ fun LabeledValue(label: String, value: String, modifier: Modifier = Modifier) {
     }
 }
 
+/**
+ * Tombol simpan. Saat [saving] tombol TIDAK dinonaktifkan secara visual (hanya klik yang dikunci), supaya spinner tetap
+ * tampil di atas warna primary dengan kontras cukup (UI-02).
+ */
 @Composable
 fun SavingButton(text: String, saving: Boolean, enabled: Boolean = true, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    Button(onClick = onClick, enabled = enabled && !saving, modifier = modifier.fillMaxWidth()) {
+    Button(
+        onClick = { if (!saving) onClick() },
+        enabled = enabled,
+        modifier = modifier.fillMaxWidth().minTouch().semantics { if (saving) stateDescription = "Sedang menyimpan" },
+    ) {
         if (saving) {
-            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
-            Spacer(Modifier.size(8.dp))
+            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = LocalContentColor.current)
+            Spacer(Modifier.width(8.dp))
             Text(stringResource(R.string.menyimpan))
         } else {
             Text(text)

@@ -9,9 +9,10 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 
 /**
@@ -115,14 +116,22 @@ fun BillingRoyalTheme(
         darkTheme -> DarkColors
         else -> LightColors
     }
-    MaterialTheme(colorScheme = colors, content = content)
+    CompositionLocalProvider(LocalDarkTheme provides darkTheme) {
+        MaterialTheme(colorScheme = colors, content = content)
+    }
 }
+
+/** Mode gelap yang sama dengan yang dipakai memilih skema (bukan tebakan dari luminansi surface). */
+val LocalDarkTheme = staticCompositionLocalOf { false }
 
 @Composable
 @ReadOnlyComposable
-private fun isDarkSurface(): Boolean = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+private fun isDarkSurface(): Boolean = LocalDarkTheme.current
 
-/** Warna badge status invoice; varian gelap dipilih mengikuti luminansi surface tema aktif. */
+/**
+ * Warna badge status invoice. Pasangan container/teks tetap (kontras sudah dihitung di review UI), varian gelap mengikuti
+ * mode gelap tema. Catatan dynamic color: warna ini TIDAK ikut wallpaper (sengaja, agar status tetap dikenali).
+ */
 object StatusColors {
     @Composable
     @ReadOnlyComposable
