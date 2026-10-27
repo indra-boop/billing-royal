@@ -119,7 +119,8 @@ fun AppNavHost(sessionManager: SessionManager) {
             InvoiceListScreen(
                 onBack = { nav.popBackStack() },
                 onOpen = { nav.navigate(Routes.invoice(it)) },
-                onCreate = { nav.navigate(Routes.INVOICE_CREATE) },
+                // Bila layar Buat Invoice masih ada di bawah (setelah "Periksa invoice"), kembali ke sana agar draft tidak terduplikasi.
+                onCreate = { if (!nav.popBackStack(Routes.INVOICE_CREATE, inclusive = false)) nav.navigate(Routes.INVOICE_CREATE) },
             )
         }
         composable(Routes.INVOICE, arguments = idArg) {

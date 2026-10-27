@@ -155,6 +155,18 @@ fun <T> LoadStateView(
     }
 }
 
+/**
+ * Muat ulang (tanpa menghapus daftar yang tampil) saat layar kembali aktif, mis. setelah membuat/mengubah data di layar lain.
+ * Pemanggilan pertama saat layar baru dibuka dilewati karena ViewModel sudah memuat sendiri.
+ */
+@Composable
+fun RefreshOnResume(onRefresh: () -> Unit) {
+    var first by remember { mutableStateOf(true) }
+    androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+        if (first) first = false else onRefresh()
+    }
+}
+
 /** Banner offline yang sama di semua layar yang melayani data cache; diumumkan ke pembaca layar saat muncul. */
 @Composable
 fun OfflineBanner(modifier: Modifier = Modifier) {

@@ -1,5 +1,18 @@
 package id.jerco.billingroyal.ui.screens
 
+import id.jerco.billingroyal.ui.components.RefreshOnResume
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Surface
+import androidx.activity.compose.BackHandler
 import androidx.compose.ui.semantics.Role
 import id.jerco.billingroyal.ui.components.minTouch
 import id.jerco.billingroyal.R
@@ -137,6 +150,7 @@ fun ExpenseListScreen(
     viewModel: ExpenseListViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    RefreshOnResume { viewModel.load(pull = true) }
     AppScaffold(
         title = stringResource(R.string.pengeluaran),
         onBack = onBack,
@@ -159,12 +173,13 @@ fun ExpenseListScreen(
                 onRetry = { viewModel.load(pull = false) },
                 isEmpty = { it.items.isEmpty() },
                 emptyMessage = stringResource(R.string.belum_ada_pengeluaran_pada_bulan),
+                emptyAction = { Button(onClick = onAdd, modifier = Modifier.minTouch()) { Text(stringResource(R.string.tambah_pengeluaran)) } },
             ) { m ->
-                LazyColumn(Modifier.fillMaxSize()) {
+                LazyColumn(contentPadding = PaddingValues(bottom = 88.dp), modifier = Modifier.fillMaxSize()) {
                     items(m.items, key = { it.id }) { e ->
-                        Column(Modifier.fillMaxWidth().clickable(role = Role.Button) { onOpen(e.id) }.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                        Column(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(role = Role.Button) { onOpen(e.id) }.padding(horizontal = 16.dp, vertical = 12.dp)) {
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text(e.description, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                                Text(e.description, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(end = 8.dp))
                                 Text(MoneyFormatter.format(e.amount), style = MaterialTheme.typography.titleMedium)
                             }
                             Text(
@@ -203,6 +218,8 @@ data class ExpenseFormState(
     val deleting: Boolean = false,
     /** Expense yang sedang diubah/dihapus ternyata sudah tidak ada di server. */
     val gone: Boolean = false,
+    /** True setelah pengguna mengubah isian: dipakai untuk peringatan saat Kembali. */
+    val dirty: Boolean = false,
 )
 
 @HiltViewModel
@@ -239,6 +256,7 @@ class ExpenseFormViewModel @Inject constructor(
                             method = e.payment_method.ifBlank { PaymentMethods.ALL.first() },
                             payee = e.payee.orEmpty(),
                             notes = e.notes.orEmpty(),
+                            dirty = false,
                         )
                     }
                     is ApiResult.Failure -> it.copy(loading = false, loadError = r.error.message)
@@ -247,7 +265,7 @@ class ExpenseFormViewModel @Inject constructor(
         }
     }
 
-    fun update(block: ExpenseFormState.() -> ExpenseFormState) = _state.update { it.block().copy(error = null) }
+    fun update(block: ExpenseFormState.() -> ExpenseFormState) = _state.update { it.block().copy(error = null, dirty = true) }
 
     fun save() {
         val s = _state.value
@@ -331,9 +349,30 @@ class ExpenseFormViewModel @Inject constructor(
 fun ExpenseFormScreen(onBack: () -> Unit, onCheckList: () -> Unit, viewModel: ExpenseFormViewModel = hiltViewModel()) {
     val s by viewModel.state.collectAsStateWithLifecycle()
     var confirmDelete by remember { mutableStateOf(false) }
+    var confirmLeave by remember { mutableStateOf(false) }
     LaunchedEffect(s.done) { if (s.done) onBack() }
+    val guardLeave = s.dirty && !s.done && !s.gone
+    BackHandler(enabled = guardLeave) { confirmLeave = true }
+    val showForm = !s.loading && s.loadError == null
 
-    AppScaffold(title = if (viewModel.isEdit) "Ubah Pengeluaran" else "Tambah Pengeluaran", onBack = onBack) { padding ->
+    AppScaffold(
+        title = if (viewModel.isEdit) stringResource(R.string.ubah_pengeluaran) else stringResource(R.string.tambah_pengeluaran_judul),
+        onBack = { if (guardLeave) confirmLeave = true else onBack() },
+        bottomBar = {
+            if (showForm) {
+                Surface(tonalElevation = 3.dp, modifier = Modifier.imePadding()) {
+                    Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        s.error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive }) }
+                        if (s.gone) {
+                            Button(onClick = onBack, modifier = Modifier.fillMaxWidth().minTouch()) { Text(stringResource(R.string.kembali_ke_daftar)) }
+                        } else {
+                            SavingButton(stringResource(R.string.simpan), saving = s.saving, enabled = !s.deleting, onClick = viewModel::save)
+                        }
+                    }
+                }
+            }
+        },
+    ) { padding ->
         Box(Modifier.padding(padding).fillMaxSize()) {
             when {
                 s.loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
@@ -342,70 +381,89 @@ fun ExpenseFormScreen(onBack: () -> Unit, onCheckList: () -> Unit, viewModel: Ex
                     verticalArrangement = Arrangement.Center,
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    Text(s.loadError!!, color = MaterialTheme.colorScheme.error)
+                    Text(s.loadError!!, color = MaterialTheme.colorScheme.error, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
                     Spacer(Modifier.height(12.dp))
-                    Button(onClick = viewModel::loadExisting) { Text(stringResource(R.string.coba_lagi)) }
+                    Button(onClick = viewModel::loadExisting, modifier = Modifier.minTouch()) { Text(stringResource(R.string.coba_lagi)) }
                 }
                 else -> Column(
-                    Modifier.fillMaxSize().imePadding().verticalScroll(rememberScrollState()).padding(16.dp),
+                    Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     DateField(stringResource(R.string.tanggal), s.date, { d -> viewModel.update { copy(date = d) } }, Modifier.fillMaxWidth())
                     OutlinedTextField(
                         value = s.category, onValueChange = { v -> viewModel.update { copy(category = v) } },
-                        label = { Text(stringResource(R.string.kategori)) }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                        label = { Text(stringResource(R.string.kategori)) }, singleLine = true,
+                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Next),
+                        modifier = Modifier.fillMaxWidth(),
                     )
                     OutlinedTextField(
                         value = s.description, onValueChange = { v -> viewModel.update { copy(description = v) } },
-                        label = { Text(stringResource(R.string.deskripsi)) }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                        label = { Text(stringResource(R.string.deskripsi)) }, singleLine = true,
+                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Next),
+                        modifier = Modifier.fillMaxWidth(),
                     )
+                    val parsedAmount = MoneyParser.parseAmount(s.amountText)
                     OutlinedTextField(
                         value = s.amountText, onValueChange = { v -> viewModel.update { copy(amountText = v) } },
                         label = { Text(stringResource(R.string.nominal_rp)) }, singleLine = true,
-                        isError = s.amountText.isNotBlank() && MoneyParser.parseAmount(s.amountText) == null,
+                        isError = s.amountText.isNotBlank() && parsedAmount == null,
                         supportingText = {
-                            if (s.amountText.isNotBlank() && MoneyParser.parseAmount(s.amountText) == null) {
-                                Text(stringResource(R.string.nominal_tidak_valid_hint))
-                            } else {
-                                Text(stringResource(R.string.nominal_contoh_hint))
+                            when {
+                                s.amountText.isBlank() -> Text(stringResource(R.string.nominal_contoh_hint))
+                                parsedAmount == null -> Text(stringResource(R.string.nominal_tidak_valid_hint))
+                                // Pratinjau cara aplikasi membaca angka (titik = ribuan, koma = desimal).
+                                else -> Text(stringResource(R.string.dibaca_sebagai_nilai, MoneyFormatter.format(parsedAmount)))
                             }
                         },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next),
                         modifier = Modifier.fillMaxWidth(),
                     )
                     PaymentMethodPicker(s.method) { m -> viewModel.update { copy(method = m) } }
                     OutlinedTextField(
                         value = s.payee, onValueChange = { v -> viewModel.update { copy(payee = v) } },
-                        label = { Text(stringResource(R.string.penerima)) }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                        label = { Text(stringResource(R.string.penerima)) }, singleLine = true,
+                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Next),
+                        modifier = Modifier.fillMaxWidth(),
                     )
                     OutlinedTextField(
                         value = s.notes, onValueChange = { v -> viewModel.update { copy(notes = v) } },
-                        label = { Text(stringResource(R.string.catatan)) }, minLines = 2, modifier = Modifier.fillMaxWidth(),
+                        label = { Text(stringResource(R.string.catatan)) }, minLines = 2,
+                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                        modifier = Modifier.fillMaxWidth(),
                     )
-                    s.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                    if (s.gone) {
-                        Button(onClick = onBack, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.kembali_ke_daftar)) }
-                    } else {
-                        SavingButton(stringResource(R.string.simpan), saving = s.saving, enabled = !s.deleting, onClick = viewModel::save)
-                    }
                     if (viewModel.isEdit && viewModel.flags.delete) {
                         OutlinedButton(
                             onClick = { confirmDelete = true },
                             enabled = !s.saving && !s.deleting,
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
                             modifier = Modifier.fillMaxWidth().minTouch(),
-                        ) { Text(if (s.deleting) "Menghapus..." else "Hapus") }
+                        ) { Text(if (s.deleting) stringResource(R.string.menghapus) else stringResource(R.string.hapus)) }
                     }
                 }
             }
         }
     }
 
+    if (confirmLeave) {
+        ConfirmDialog(
+            title = stringResource(R.string.buang_perubahan_judul),
+            message = stringResource(R.string.buang_perubahan_pesan),
+            confirmText = stringResource(R.string.buang),
+            onConfirm = { confirmLeave = false; onBack() },
+            onDismiss = { confirmLeave = false },
+            destructive = true,
+        )
+    }
     if (s.uncertain) {
         UncertainDialog(
-            message = stringResource(R.string.koneksi_terputus_atau_waktu_habis_2) +
-                "Periksa daftar pengeluaran terlebih dahulu sebelum mengirim ulang.",
+            message = stringResource(R.string.pengeluaran_koneksi_terputus_pesan),
+            title = stringResource(R.string.pengeluaran_mungkin_sudah_tersimpan),
+            checkLabel = stringResource(R.string.periksa_daftar_pengeluaran),
+            resendTitle = stringResource(R.string.kirim_ulang_pengeluaran_tanya),
+            dismissHint = stringResource(R.string.isian_tetap_di_layar),
             onCheck = { viewModel.dismissUncertain(); onCheckList() },
             onResend = { viewModel.dismissUncertain(); viewModel.save() },
+            resendWarning = stringResource(R.string.peringatan_kirim_ulang_pengeluaran),
             onDismiss = viewModel::dismissUncertain,
         )
     }
@@ -416,6 +474,7 @@ fun ExpenseFormScreen(onBack: () -> Unit, onCheckList: () -> Unit, viewModel: Ex
             confirmText = stringResource(R.string.hapus),
             onConfirm = { confirmDelete = false; viewModel.delete() },
             onDismiss = { confirmDelete = false },
+            destructive = true,
         )
     }
 }
@@ -497,12 +556,17 @@ fun ReportScreen(onBack: () -> Unit, onOpenInvoice: (Long) -> Unit, viewModel: R
                     DateField(stringResource(R.string.sampai), state.to, viewModel::setTo, Modifier.weight(1f))
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(PaymentScope.ALL to "Semua", PaymentScope.PAID to "Lunas", PaymentScope.UNPAID to "Belum lunas").forEach { (v, label) ->
+                    listOf(PaymentScope.ALL to stringResource(R.string.semua), PaymentScope.PAID to stringResource(R.string.lunas), PaymentScope.UNPAID to stringResource(R.string.belum_lunas)).forEach { (v, label) ->
                         FilterChip(selected = state.scope == v, onClick = { viewModel.setScope(v) }, label = { Text(label) })
                     }
                 }
                 Text(stringResource(R.string.rentang_maksimal_31_hari), style = MaterialTheme.typography.bodySmall)
-                state.rangeError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                state.rangeError?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive }) }
+            }
+            // Rentang tidak valid: jangan menampilkan hasil lama (bisa menyesatkan), tampilkan petunjuk saja.
+            if (state.rangeError != null) {
+                Text(stringResource(R.string.rekap_perbaiki_rentang), modifier = Modifier.padding(16.dp), style = MaterialTheme.typography.bodyMedium)
+                return@Column
             }
             LoadStateView(
                 state = state.load,

@@ -10,15 +10,12 @@
     <string name="batal">Batal</string>
     <string name="kirim_ulang">Kirim ulang?</string>
     <string name="ya_kirim_ulang">Ya, kirim ulang</string>
-    <string name="status_penyimpanan_belum_pasti">Status penyimpanan belum pasti</string>
     <string name="periksa_daftar">Periksa daftar</string>
-    <string name="kirim_ulang_2">Kirim ulang</string>
     <string name="tutup">Tutup</string>
     <string name="pilih">Pilih</string>
     <string name="menyimpan">Menyimpan...</string>
 
     <!-- AuthScreens.kt -->
-    <string name="masuk_ulang">Masuk ulang</string>
     <string name="masuk_sebagai_operator">Masuk sebagai operator</string>
     <string name="username">Username</string>
     <string name="password">Password</string>
@@ -41,10 +38,9 @@
     <string name="tidak_ada_invoice_pada_filter">Tidak ada invoice pada filter ini.</string>
     <string name="bulan_sebelumnya">Bulan sebelumnya</string>
     <string name="bulan_berikutnya">Bulan berikutnya</string>
-    <string name="sisa">Sisa </string>
+    <string name="sisa">Sisa %1$s</string>
     <string name="detail_invoice">Detail Invoice</string>
     <string name="bagikan">Bagikan</string>
-    <string name="tetap_bagikan">Tetap bagikan</string>
     <string name="ubah_status">Ubah status</string>
     <string name="ya_ubah">Ya, ubah</string>
     <string name="item">Item</string>
@@ -58,22 +54,16 @@
     <string name="harga_satuan_khusus_opsional">Harga satuan khusus (opsional)</string>
     <string name="nominal_tidak_valid_contoh_15000">Nominal tidak valid. Contoh: 15.000 atau 15.000,50</string>
     <string name="dibaca_sebagai">Dibaca sebagai </string>
-    <string name="perkiraan_jumlah_belum_final">Perkiraan jumlah (belum final): </string>
     <string name="tambah_item_dari_katalog">Tambah item dari katalog</string>
     <string name="catatan">Catatan</string>
     <string name="perkiraan_subtotal_preview">Perkiraan subtotal (preview)</string>
     <string name="invoice_baru_selalu_disimpan_dengan">Invoice baru selalu disimpan dengan status Draft.</string>
     <string name="simpan">Simpan</string>
-    <string name="kosongkan_draft">Kosongkan draft</string>
     <string name="pilih_customer">Pilih customer</string>
     <string name="pilih_item">Pilih item</string>
     <string name="draft_invoice_lokal_akan_dihapus">Draft invoice lokal akan dihapus dari perangkat ini.</string>
-    <string name="kosongkan">Kosongkan</string>
     <string name="memeriksa_daftar_invoice">Memeriksa daftar invoice...</string>
     <string name="periksa_lagi">Periksa lagi</string>
-    <string name="tidak_ada_invoice_customer_ini">Tidak ada invoice customer ini pada tanggal tersebut.</string>
-    <string name="invoice_customer_ini_hari_inipada">Invoice customer ini hari ini/pada tanggal tersebut:</string>
-    <string name="invoice_sudah_ada_hapus_draft">Invoice sudah ada, hapus draft</string>
     <string name="cari">Cari</string>
     <string name="tidak_ada_hasil">Tidak ada hasil.</string>
 
@@ -85,11 +75,10 @@
     <string name="hapus_customer">Hapus customer</string>
     <string name="customer_ini_akan_dihapus_customer">Customer ini akan dihapus. Customer yang sudah punya invoice tidak dapat dihapus.</string>
     <string name="hapus">Hapus</string>
-    <string name="nama">Nama *</string>
+    <string name="nama">Nama (wajib)</string>
     <string name="email">Email</string>
     <string name="telepon">Telepon</string>
     <string name="alamat">Alamat</string>
-    <string name="koneksi_terputus_atau_waktu_habis">Koneksi terputus atau waktu habis setelah data dikirim. Customer mungkin sudah tersimpan. </string>
     <string name="price_list">Price list</string>
     <string name="tanpa_price_list">Tanpa price list</string>
 
@@ -97,15 +86,14 @@
     <string name="tambah_pengeluaran">Tambah pengeluaran</string>
     <string name="total_bulan_ini">Total bulan ini</string>
     <string name="belum_ada_pengeluaran_pada_bulan">Belum ada pengeluaran pada bulan ini.</string>
-    <string name="kategori">Kategori *</string>
-    <string name="deskripsi">Deskripsi *</string>
-    <string name="nominal_rp">Nominal (Rp) *</string>
+    <string name="kategori">Kategori (wajib)</string>
+    <string name="deskripsi">Deskripsi (wajib)</string>
+    <string name="nominal_rp">Nominal (Rp, wajib)</string>
     <string name="penerima">Penerima</string>
     <string name="kembali_ke_daftar">Kembali ke daftar</string>
-    <string name="koneksi_terputus_atau_waktu_habis_2">Koneksi terputus atau waktu habis setelah data dikirim. Pengeluaran mungkin sudah tersimpan. </string>
     <string name="hapus_pengeluaran">Hapus pengeluaran</string>
     <string name="pengeluaran_ini_akan_dihapus">Pengeluaran ini akan dihapus.</string>
-    <string name="metode_bayar">Metode bayar *</string>
+    <string name="metode_bayar">Metode bayar (wajib)</string>
     <string name="rentang_maksimal_31_hari">Rentang maksimal 31 hari.</string>
     <string name="tidak_ada_invoice_pada_rentang">Tidak ada invoice pada rentang ini.</string>
     <string name="ringkasan">Ringkasan</string>
@@ -204,4 +192,34 @@
     <string name="kemungkinan_besar_ini">Kemungkinan besar ini (subtotal sama dengan perkiraan draft)</string>
     <string name="ini_invoicenya_hapus_draft">Ini invoicenya, hapus draft</string>
     <string name="hapus_teks">Hapus</string>
+
+    <string name="belum_ada_customer">Belum ada customer.</string>
+    <string name="customer_tidak_ditemukan">Customer tidak ditemukan.</string>
+    <string name="menghapus">Menghapus...</string>
+    <string name="ubah_customer">Ubah Customer</string>
+    <string name="buang_perubahan_judul">Buang perubahan?</string>
+    <string name="buang_perubahan_pesan">Perubahan yang belum disimpan akan hilang.</string>
+    <string name="buang">Buang</string>
+    <string name="customer_koneksi_terputus_pesan">Koneksi terputus saat data dikirim, jadi kami belum tahu hasilnya. Periksa dulu agar tidak membuat customer ganda.</string>
+    <string name="customer_mungkin_sudah_tersimpan">Customer mungkin sudah tersimpan</string>
+    <string name="periksa_daftar_customer">Periksa daftar customer</string>
+    <string name="kirim_ulang_customer_tanya">Kirim ulang customer?</string>
+    <string name="isian_tetap_di_layar">Isian tetap ada di layar ini.</string>
+    <string name="peringatan_kirim_ulang_customer">Customer mungkin sudah ada di server. Mengirim ulang bisa membuat customer ganda. Lanjutkan hanya bila Anda sudah memeriksa daftar dan customer ini belum ada.</string>
+
+    <string name="tambah_customer_judul">Tambah Customer</string>
+
+    <string name="belum_ada_invoice_bulan_ini">Belum ada invoice bulan ini.</string>
+    <string name="memperbarui_status">Memperbarui status...</string>
+
+    <string name="ubah_pengeluaran">Ubah Pengeluaran</string>
+    <string name="tambah_pengeluaran_judul">Tambah Pengeluaran</string>
+    <string name="pengeluaran_koneksi_terputus_pesan">Koneksi terputus saat data dikirim, jadi kami belum tahu hasilnya. Periksa dulu agar tidak membuat pengeluaran ganda.</string>
+    <string name="pengeluaran_mungkin_sudah_tersimpan">Pengeluaran mungkin sudah tersimpan</string>
+    <string name="periksa_daftar_pengeluaran">Periksa daftar pengeluaran</string>
+    <string name="kirim_ulang_pengeluaran_tanya">Kirim ulang pengeluaran?</string>
+    <string name="peringatan_kirim_ulang_pengeluaran">Pengeluaran mungkin sudah ada di server. Mengirim ulang bisa membuat pengeluaran ganda. Lanjutkan hanya bila Anda sudah memeriksa daftar dan pengeluaran ini belum ada.</string>
+    <string name="rekap_perbaiki_rentang">Perbaiki rentang tanggal di atas untuk melihat rekap.</string>
+    <string name="lunas">Lunas</string>
+    <string name="belum_lunas">Belum lunas</string>
 </resources>
