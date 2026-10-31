@@ -15,7 +15,7 @@ jobs:
   # Build debug pada setiap push + unit test, lalu unggah app-debug.apk sebagai artifact.
   build-debug:
     if: github.event_name == 'push'
-    runs-on: [self-hosted, jerco-public, linode]
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -27,7 +27,8 @@ jobs:
 
       - uses: android-actions/setup-android@v3
         with:
-          # Legacy 'tools' package no longer exists for cmdline-tools 16.0 (fresh SDK on the self-hosted runner).
+          # Paket legacy "tools" sudah tidak ada di cmdline-tools 16.0 (SDK baru dari setup-android).
+          # Cukup platform-tools; AGP mengunduh platform serta build-tools yang dibutuhkan.
           packages: platform-tools
 
       - uses: gradle/actions/setup-gradle@v4
@@ -49,7 +50,7 @@ jobs:
   # Secrets yang dibutuhkan: KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD
   release:
     if: github.event_name == 'workflow_dispatch'
-    runs-on: [self-hosted, jerco-public, linode]
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -61,7 +62,8 @@ jobs:
 
       - uses: android-actions/setup-android@v3
         with:
-          # Legacy 'tools' package no longer exists for cmdline-tools 16.0 (fresh SDK on the self-hosted runner).
+          # Paket legacy "tools" sudah tidak ada di cmdline-tools 16.0 (SDK baru dari setup-android).
+          # Cukup platform-tools; AGP mengunduh platform serta build-tools yang dibutuhkan.
           packages: platform-tools
 
       - uses: gradle/actions/setup-gradle@v4
