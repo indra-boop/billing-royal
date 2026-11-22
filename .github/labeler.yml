@@ -1,0 +1,30 @@
+# Label path untuk PR router gratis (.github/workflows/pr-router.yml).
+# Labeler tidak pernah menjalankan kode PR; file ini hanya konfigurasi pencocokan path.
+
+frontend:
+  - changed-files:
+      - any-glob-to-any-file:
+          - app/**
+
+deploy:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "*.bat"
+          - gradle/**
+          - "*.gradle.kts"
+
+deps:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "**/*.gradle.kts"
+          - gradle.properties
+
+docs:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "**/*.md"
+
+ci:
+  - changed-files:
+      - any-glob-to-any-file:
+          - ".github/**"
